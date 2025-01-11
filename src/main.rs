@@ -8,6 +8,7 @@ use termimad::MadSkin;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
+    cursor,
 };
 use std::io::{stdout, Write};
 use serde::{Deserialize, Serialize};
@@ -152,15 +153,16 @@ impl ChatBot {
 
         let mut stream = response.bytes_stream();
         let mut current_message = String::new();
+        let mut current_block = String::new();
+        let mut rendered_length = 0;
+        let mut lines_printed = 0;
         let skin = Self::create_custom_skin();
+        
+        // print a new line before the assistant message
+        println!("");
+        stdout().flush()?;
+        let initial_position = cursor::position()?;
 
-        // Save cursor position before we start streaming
-        execute!(
-            stdout(),
-            crossterm::cursor::SavePosition
-        )?;
-
-        // First phase: Stream the raw text
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
             let chunk_str = String::from_utf8_lossy(&chunk);
@@ -168,30 +170,61 @@ impl ChatBot {
             for line in chunk_str.lines() {
                 if line.starts_with("data: ") {
                     let data = &line["data: ".len()..];
-                    if data == "[DONE]" {
-                        continue;
-                    }
+                    if data == "[DONE]" { continue; }
                     
                     if let Ok(json) = serde_json::from_str::<Value>(data) {
                         if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
                             current_message.push_str(content);
-                            print!("{}", content);
-                            stdout().flush()?;
+                            current_block.push_str(content);
+                            lines_printed += content.matches('\n').count();
+
+                            if content.contains("\n\n") || content.contains("```") {
+                                // Move to start of the raw text block and clear everything below
+                                execute!(
+                                    stdout(),
+                                    cursor::MoveToColumn(0),
+                                    cursor::MoveUp(lines_printed as u16),
+                                    Clear(ClearType::FromCursorDown)
+                                )?;
+                                
+                                // Print the new content
+                                let new_content = &current_message[rendered_length..];
+                                skin.print_text(new_content);
+                                rendered_length = current_message.len();
+                                current_block.clear();
+                                lines_printed = 0;
+                                
+                                // Ensure we're at the start of a new line
+                                execute!(stdout(), cursor::MoveToColumn(0))?;
+                                stdout().flush()?;
+                            } else {
+                                if current_block.len() == content.len() {
+                                    // Start of new block, ensure we're at line start
+                                    execute!(stdout(), cursor::MoveToColumn(0))?;
+                                    lines_printed = 0;
+                                }
+                                print!("{}", content);
+                                stdout().flush()?;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Second phase: Restore cursor and render with proper markdown
-        execute!(
-            stdout(),
-            crossterm::cursor::RestorePosition,
-            Clear(ClearType::FromCursorDown)
-        )?;
-        
-        skin.print_text(&current_message);
-        println!("\n");
+        // Final render for any remaining content
+        if rendered_length < current_message.len() {
+            execute!(
+                stdout(),
+                cursor::MoveToColumn(0),
+                cursor::MoveUp(lines_printed as u16),
+                Clear(ClearType::FromCursorDown)
+            )?;
+            
+            let remaining_content = &current_message[rendered_length..];
+            skin.print_text(remaining_content);
+            println!();
+        }
         
         self.add_message("assistant", &current_message);
         Ok(())
@@ -214,7 +247,7 @@ async fn main() -> Result<()> {
                     break;
                 }
                 
-                print!("Assistant: ");
+                println!("Assistant: ");
                 chatbot.send_message(&line).await?;
             }
             Err(_) => break,
