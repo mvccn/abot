@@ -10,11 +10,15 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 use std::io::{stdout, Write};
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use std::fs;
 
 struct ChatBot {
     client: reqwest::Client,
     history: Vec<Message>,
     api_key: String,
+    config: Config,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -23,13 +27,86 @@ struct Message {
     content: String,
 }
 
-impl ChatBot {
-    fn new(api_key: String) -> Self {
+#[derive(Debug, Serialize, Deserialize)]
+struct Config {
+    api_key: Option<String>,
+    initial_prompt: String,
+    model: String,
+    temperature: f32,
+    max_tokens: u32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
         Self {
+            api_key: Some(String::from("Your deepseek key")),
+            initial_prompt: String::from(
+                "You are an intelligent AI assistant. Please be concise and helpful in your responses."
+            ),
+            model: String::from("deepseek-chat"),
+            temperature: 0.7,
+            max_tokens: 2000,
+        }
+    }
+}
+
+impl Config {
+    fn load() -> Result<Self> {
+        let config_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?
+            .join(".config")
+            .join("abot");
+            
+        let config_path = config_dir.join("config.toml");
+
+        // Create config directory if it doesn't exist
+        if !config_dir.exists() {
+            println!("Creating config directory: {}", config_dir.display());
+            fs::create_dir_all(&config_dir)?;
+        }
+
+        // If config file doesn't exist, create it with default values
+        if !config_path.exists() {
+            println!("Creating default config file: {}", config_path.display());
+            let default_config = Config::default();
+            let toml = toml::to_string_pretty(&default_config)?;
+            fs::write(&config_path, toml)?;
+            println!("Please set your API key in the config file or DEEPSEEK_API_KEY environment variable");
+            println!("You can edit the config file at: {}", config_path.display());
+            return Ok(default_config);
+        }
+
+        println!("Loading config from: {}", config_path.display());
+        // Read and parse existing config file
+        let config_str = fs::read_to_string(&config_path)?;
+        let config: Config = toml::from_str(&config_str)?;
+
+        if config.api_key.is_none() && std::env::var("DEEPSEEK_API_KEY").is_err() {
+            println!("Warning: No API key found in config file or DEEPSEEK_API_KEY environment variable");
+            println!("Please set your API key in: {}", config_path.display());
+            println!("Or set the DEEPSEEK_API_KEY environment variable");
+        }
+
+        Ok(config)
+    }
+}
+
+impl ChatBot {
+    fn new(config: Config) -> Self {
+        let api_key = config.api_key.clone()
+            .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
+            .expect("API key must be set in config or DEEPSEEK_API_KEY environment variable");
+
+        let mut bot = Self {
             client: reqwest::Client::new(),
             history: Vec::new(),
             api_key,
-        }
+            config,
+        };
+
+        let initial_prompt = bot.config.initial_prompt.clone();
+        bot.add_message("system", &initial_prompt);
+        bot
     }
 
     fn add_message(&mut self, role: &str, content: &str) {
@@ -65,9 +142,11 @@ impl ChatBot {
             .post("https://api.deepseek.com/v1/chat/completions")
             .headers(headers)
             .json(&json!({ 
-                "model": "deepseek-chat",
+                "model": self.config.model,
                 "messages": self.history,
-                "stream": true
+                "stream": true,
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_tokens
             }))
             .send()
             .await?;
@@ -122,13 +201,9 @@ impl ChatBot {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-    let api_key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
-
-    let mut chatbot = ChatBot::new(api_key);
+    let config = Config::load()?;
+    let mut chatbot = ChatBot::new(config);
     let mut rl = DefaultEditor::new()?;
-    let skin = MadSkin::default();
-    // let mut terminal = Terminal::new(skin);
 
     println!("Welcome to the Abot! Type 'quit' or 'exit' to exit.");
     
