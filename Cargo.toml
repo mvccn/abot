@@ -1,0 +1,24 @@
+[package]
+name = "abot"
+version = "0.1.0"
+edition = "2021"
+description = "Another CLI chatbot but support markdown output and written in Rust"
+authors = ["Michael Li <michael@vc.cn>"]
+
+# Add these lines for cargo install
+[[bin]]
+name = "abot"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.36", features = ["full"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures = "0.3"
+termimad = "0.20"
+crossterm = "0.23.2"
+rustyline = "13.0"
+anyhow = "1.0"
+dotenv = "0.15"
+pulldown-cmark = "0.9"
