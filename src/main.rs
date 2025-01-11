@@ -10,7 +10,6 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 use std::io::{stdout, Write};
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use std::fs;
 
