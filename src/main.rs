@@ -29,23 +29,43 @@ struct Message {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
-    api_key: Option<String>,
+    deepseek: DeepseekConfig,
+    ollama: OllamaConfig,
     initial_prompt: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DeepseekConfig {
+    api_key: Option<String>,
     model: String,
     temperature: f32,
     max_tokens: u32,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct OllamaConfig {
+    url: String,
+    model: String,
+    temperature: f32,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
-            api_key: Some(String::from("Your deepseek key")),
+            deepseek: DeepseekConfig {
+                api_key: Some(String::from("Your deepseek key")),
+                model: String::from("deepseek-chat"),
+                temperature: 0.7,
+                max_tokens: 2000,
+            },
+            ollama: OllamaConfig {
+                url: String::from("http://localhost:11434"),
+                model: String::from("llama2"),
+                temperature: 0.7,
+            },
             initial_prompt: String::from(
                 "You are an intelligent AI assistant. Please be concise and helpful in your responses."
             ),
-            model: String::from("deepseek-chat"),
-            temperature: 0.7,
-            max_tokens: 2000,
         }
     }
 }
@@ -81,7 +101,7 @@ impl Config {
         let config_str = fs::read_to_string(&config_path)?;
         let config: Config = toml::from_str(&config_str)?;
 
-        if config.api_key.is_none() && std::env::var("DEEPSEEK_API_KEY").is_err() {
+        if config.deepseek.api_key.is_none() && std::env::var("DEEPSEEK_API_KEY").is_err() {
             println!("Warning: No API key found in config file or DEEPSEEK_API_KEY environment variable");
             println!("Please set your API key in: {}", config_path.display());
             println!("Or set the DEEPSEEK_API_KEY environment variable");
@@ -93,7 +113,7 @@ impl Config {
 
 impl ChatBot {
     fn new(config: Config) -> Self {
-        let api_key = config.api_key.clone()
+        let api_key = config.deepseek.api_key.clone()
             .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
             .expect("API key must be set in config or DEEPSEEK_API_KEY environment variable");
 
@@ -129,25 +149,51 @@ impl ChatBot {
     }
 
     async fn send_message(&mut self, message: &str) -> Result<()> {
+        let is_ollama = message.starts_with("#ollama");
+        let message = if is_ollama {
+            message.trim_start_matches("#ollama").trim()
+        } else {
+            message
+        };
+        
         self.add_message("user", message);
 
         let headers = {
             let mut headers = HeaderMap::new();
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", self.api_key))?);
+            if !is_ollama {
+                headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", self.api_key))?);
+            }
             headers
         };
 
-        let response = self.client
-            .post("https://api.deepseek.com/v1/chat/completions")
-            .headers(headers)
-            .json(&json!({ 
-                "model": self.config.model,
+        let url = if is_ollama {
+            format!("{}/api/chat", self.config.ollama.url)
+        } else {
+            "https://api.deepseek.com/v1/chat/completions".to_string()
+        };
+
+        let payload = if is_ollama {
+            json!({
+                "model": self.config.ollama.model,
                 "messages": self.history,
                 "stream": true,
-                "temperature": self.config.temperature,
-                "max_tokens": self.config.max_tokens
-            }))
+                "temperature": self.config.ollama.temperature,
+            })
+        } else {
+            json!({ 
+                "model": self.config.deepseek.model,
+                "messages": self.history,
+                "stream": true,
+                "temperature": self.config.deepseek.temperature,
+                "max_tokens": self.config.deepseek.max_tokens
+            })
+        };
+
+        let response = self.client
+            .post(url)
+            .headers(headers)
+            .json(&payload)
             .send()
             .await?;
 
@@ -157,8 +203,8 @@ impl ChatBot {
         let mut rendered_length = 0;
         let mut lines_printed = 0;
         let skin = Self::create_custom_skin();
-        
-        // print a new line before the assistant message
+
+        // Print the Assistant prefix and save position
         println!("");
         stdout().flush()?;
         let initial_position = cursor::position()?;
