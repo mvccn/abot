@@ -207,7 +207,7 @@ impl ChatBot {
         // Print the Assistant prefix and save position
         println!("");
         stdout().flush()?;
-        let initial_position = cursor::position()?;
+        // let initial_position = cursor::position()?;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
