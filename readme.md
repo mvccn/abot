@@ -1,10 +1,9 @@
-# abot
-
-Another CLI chatbot, written in Rust and very fast, support markdown output and use DeepSeek v3. 
+# abot -- another, ai, agent bot
+CLI chatbot, written in Rust and very fast, support markdown output and use DeepSeek v3 by default. 
 
 ## Features
 - Fast and responsive CLI interface
-- Markdown rendering for code blocks and formatting
+- Render to markdown for code blocks and formatting
 - Streaming responses
 
 ## Installation
