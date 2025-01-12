@@ -112,10 +112,10 @@ impl Config {
 }
 
 impl ChatBot {
-    fn new(config: Config) -> Self {
+    fn new(config: Config) -> Result<Self> {
         let api_key = config.deepseek.api_key.clone()
             .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
-            .expect("API key must be set in config or DEEPSEEK_API_KEY environment variable");
+            .ok_or_else(|| anyhow::anyhow!("API key must be set in config or DEEPSEEK_API_KEY environment variable"))?;
 
         let mut bot = Self {
             client: reqwest::Client::new(),
@@ -126,7 +126,7 @@ impl ChatBot {
 
         let initial_prompt = bot.config.initial_prompt.clone();
         bot.add_message("system", &initial_prompt);
-        bot
+        Ok(bot)
     }
 
     fn add_message(&mut self, role: &str, content: &str) {
@@ -280,7 +280,7 @@ impl ChatBot {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = Config::load()?;
-    let mut chatbot = ChatBot::new(config);
+    let mut chatbot = ChatBot::new(config)?;
     let mut rl = DefaultEditor::new()?;
 
     println!("Welcome to the Abot! Type 'quit' or 'exit' to exit.");
