@@ -22,10 +22,11 @@ pub struct WebSearch {
     client: Client,
     cache_dir: PathBuf,
     conversation_id: String,
+    max_results: usize,
 }
 
 impl WebSearch {
-    pub fn new(conversation_id: &str) -> Result<Self> {
+    pub fn new(conversation_id: &str, max_results: usize) -> Result<Self> {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         let cache_dir = home_dir
@@ -41,6 +42,7 @@ impl WebSearch {
             client: Client::new(),
             cache_dir,
             conversation_id: conversation_id.to_string(),
+            max_results,
         })
     }
 
@@ -200,7 +202,7 @@ impl WebSearch {
         
         // Create futures for all URLs (limit to first 3)
         let fetch_futures: Vec<_> = search_results.iter()
-            .take(3)
+            .take(self.max_results)
             .map(|(url, _)| {
                 println!("Fetching content from: {}", url);
                 self.fetch_and_cache_url(url)

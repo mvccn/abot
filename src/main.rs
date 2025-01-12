@@ -37,6 +37,7 @@ struct Config {
     deepseek: DeepseekConfig,
     ollama: OllamaConfig,
     initial_prompt: String,
+    web_search: WebSearchConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,6 +53,11 @@ struct OllamaConfig {
     url: String,
     model: String,
     temperature: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WebSearchConfig {
+    result_limit: usize,
 }
 
 impl Default for Config {
@@ -71,6 +77,9 @@ impl Default for Config {
             initial_prompt: String::from(
                 "You are an intelligent AI assistant. Please be concise and helpful in your responses."
             ),
+            web_search: WebSearchConfig {
+                result_limit: 10,
+            },
         }
     }
 }
@@ -134,7 +143,7 @@ impl ChatBot {
             fs::create_dir_all(&cache_dir)?;
         }
         
-        let web_search = WebSearch::new(&conversation_id)?;
+        let web_search = WebSearch::new(&conversation_id, config.web_search.result_limit)?;
 
         let mut bot = Self {
             client: reqwest::Client::new(),
