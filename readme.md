@@ -22,6 +22,15 @@ git clone https://github.com/mvccn/abot.git
 cd abot
 cargo build --release
 ```
+### Do not forget to add your own api key
+
+```bash
+echo "DEEPSEEK_API_KEY=your-api-key-here" >> .env
+```
+or add one line to ~/.config/abot/config.toml, this file will be created when you run abot for the first time.
+```toml
+api_key = "your-api-key-here"
+```
 
 ## Demo
 
