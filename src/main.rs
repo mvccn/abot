@@ -252,10 +252,11 @@ impl ChatBot {
         let mut lines_printed = 0;
         let skin = Self::create_custom_skin();
 
-        // Print the Assistant prefix and save position
-        println!("");
+        // Print the Assistant prefix and get initial cursor position
+        print!("Assistant: ");
         stdout().flush()?;
-        // let initial_position = cursor::position()?;
+        let mut initial_position = cursor::position()?;
+        println!();  // Move to next line after the prefix
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
@@ -273,27 +274,26 @@ impl ChatBot {
                             lines_printed += content.matches('\n').count();
 
                             if content.contains("\n\n") || content.contains("```") {
-                                // Move to start of the raw text block and clear everything below
+                                // Return to initial position and clear everything below
                                 execute!(
                                     stdout(),
-                                    cursor::MoveToColumn(0),
-                                    cursor::MoveUp(lines_printed as u16),
+                                    cursor::MoveTo(initial_position.0, initial_position.1),
                                     Clear(ClearType::FromCursorDown)
                                 )?;
                                 
-                                // Print the new content
-                                let new_content = &current_message[rendered_length..];
-                                skin.print_text(new_content);
+                                // Print the entire message from the beginning
+                                skin.print_text(&current_message);
                                 rendered_length = current_message.len();
                                 current_block.clear();
+                                
+                                // Update initial_position to the new cursor position
+                                initial_position = cursor::position()?;
                                 lines_printed = 0;
                                 
-                                // Ensure we're at the start of a new line
-                                execute!(stdout(), cursor::MoveToColumn(0))?;
                                 stdout().flush()?;
                             } else {
                                 if current_block.len() == content.len() {
-                                    // Start of new block, ensure we're at line start
+                                    // Start of new block
                                     execute!(stdout(), cursor::MoveToColumn(0))?;
                                     lines_printed = 0;
                                 }
@@ -310,13 +310,11 @@ impl ChatBot {
         if rendered_length < current_message.len() {
             execute!(
                 stdout(),
-                cursor::MoveToColumn(0),
-                cursor::MoveUp(lines_printed as u16),
+                cursor::MoveTo(initial_position.0, initial_position.1),
                 Clear(ClearType::FromCursorDown)
             )?;
             
-            let remaining_content = &current_message[rendered_length..];
-            skin.print_text(remaining_content);
+            skin.print_text(&current_message);
             println!();
         }
         

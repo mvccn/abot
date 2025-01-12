@@ -26,6 +26,7 @@ url = "2.5"
 urlencoding = "2.1"
 percent-encoding = "2.3"
 chrono = "0.4"
+pulldown-cmark = "0.8"
 
 [[bin]]
 name = "abot"
