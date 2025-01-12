@@ -9,7 +9,7 @@ Another CLI chatbot, written in Rust and very fast, support markdown output and 
 
 ## Installation
 
-### From crates.io
+### From git directly
 
 ```bash
 cargo install --git https://github.com/mvccn/abot
@@ -23,3 +23,7 @@ git clone https://github.com/mvccn/abot.git
 cd abot
 cargo build --release
 ```
+
+## Demo
+
+![abot demo](./assets/abot.png)
