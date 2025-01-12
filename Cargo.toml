@@ -18,6 +18,14 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
 dirs = "5.0"
 toml = "0.8"
+uuid = { version = "1.7.0", features = ["v4"] }
+# New packages for web search
+scraper = "0.18"
+sha2 = "0.10"
+url = "2.5"
+urlencoding = "2.1"
+percent-encoding = "2.3"
+chrono = "0.4"
 
 [[bin]]
 name = "abot"

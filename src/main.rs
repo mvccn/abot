@@ -13,12 +13,17 @@ use crossterm::{
 use std::io::{stdout, Write};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use uuid::Uuid;
+mod web_search;
+use web_search::WebSearch;
 
 struct ChatBot {
     client: reqwest::Client,
     history: Vec<Message>,
     api_key: String,
     config: Config,
+    web_search: WebSearch,
+    conversation_id: String,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -117,11 +122,27 @@ impl ChatBot {
             .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
             .ok_or_else(|| anyhow::anyhow!("API key must be set in config or DEEPSEEK_API_KEY environment variable"))?;
 
+        let conversation_id = Uuid::new_v4().to_string();
+        
+        // Create conversation directory
+        let cache_dir = dirs::cache_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
+            .join("abot")
+            .join(&conversation_id);
+        
+        if !cache_dir.exists() {
+            fs::create_dir_all(&cache_dir)?;
+        }
+        
+        let web_search = WebSearch::new(&conversation_id)?;
+
         let mut bot = Self {
             client: reqwest::Client::new(),
             history: Vec::new(),
             api_key,
             config,
+            web_search,
+            conversation_id,
         };
 
         let initial_prompt = bot.config.initial_prompt.clone();
@@ -149,14 +170,32 @@ impl ChatBot {
     }
 
     async fn send_message(&mut self, message: &str) -> Result<()> {
-        let is_ollama = message.starts_with("#ollama");
-        let message = if is_ollama {
-            message.trim_start_matches("#ollama").trim()
+        let (is_ollama, is_web_search) = (
+            message.contains("#ollama"),
+            message.contains("@web")
+        );
+
+        let query = message
+        .split_whitespace()
+        .filter(|word| !word.starts_with('#') && !word.starts_with('@'))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+        let message = if is_web_search {
+            // Display a message indicating a web search is being performed
+            println!("Performing a web search for: '{}'", query);
+
+            let web_results = self.web_search.search(&query).await?;
+            format!(
+                "Based on the following web search results, please answer the question: '{}'\n\nSearch Results:\n{}",
+                query,
+                web_results
+            )
         } else {
-            message
+            query
         };
-        
-        self.add_message("user", message);
+
+        self.add_message("user", &message);
 
         let headers = {
             let mut headers = HeaderMap::new();
@@ -275,6 +314,76 @@ impl ChatBot {
         self.add_message("assistant", &current_message);
         Ok(())
     }
+
+    fn save_last_interaction(&self) -> Result<()> {
+        if self.history.len() < 2 {
+            println!("No conversation to save yet.");
+            return Ok(());
+        }
+
+        let cache_dir = dirs::cache_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
+            .join("abot")
+            .join(&self.conversation_id);
+
+        let save_dir = cache_dir.join("save");
+        if !save_dir.exists() {
+            fs::create_dir_all(&save_dir)?;
+        }
+
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let filename = save_dir.join(format!("interaction_{}.md", timestamp));
+
+        let last_user_msg = self.history.iter().rev()
+            .find(|msg| msg.role == "user")
+            .ok_or_else(|| anyhow::anyhow!("No user message found"))?;
+
+        let last_assistant_msg = self.history.iter().rev()
+            .find(|msg| msg.role == "assistant")
+            .ok_or_else(|| anyhow::anyhow!("No assistant message found"))?;
+
+        let content = format!(
+            "User:{}\nAssistant:{}\n\n",
+            last_user_msg.content,
+            last_assistant_msg.content
+        );
+
+        fs::write(&filename, content)?;
+        println!("Saved conversation to: {}", filename.display());
+        Ok(())
+    }
+
+    fn save_all_history(&self) -> Result<()> {
+        if self.history.is_empty() {
+            println!("No conversation to save yet.");
+            return Ok(());
+        }
+
+        let cache_dir = dirs::cache_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
+            .join("abot")
+            .join(&self.conversation_id);
+
+        let save_dir = cache_dir.join("save");
+        if !save_dir.exists() {
+            fs::create_dir_all(&save_dir)?;
+        }
+
+        let filename = save_dir.join("saveall.md");
+        let mut content = String::new();
+
+        // Skip the first system message
+        for message in self.history.iter().skip(1) {
+            content.push_str(&format!("{}:{}\n\n", 
+                message.role,
+                message.content
+            ));
+        }
+
+        fs::write(&filename, content)?;
+        println!("Saved full conversation to: {}", filename.display());
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -289,8 +398,31 @@ async fn main() -> Result<()> {
         let readline = rl.readline("You: ");
         match readline {
             Ok(line) => {
-                if line.trim().eq_ignore_ascii_case("quit") || line.trim().eq_ignore_ascii_case("exit") {
+                let line = line.trim();
+                if line.eq_ignore_ascii_case("quit") || line.eq_ignore_ascii_case("exit") {
                     break;
+                }
+                
+                // Handle commands
+                if line.starts_with('/') {
+                    match line {
+                        "/save" => {
+                            if let Err(e) = chatbot.save_last_interaction() {
+                                println!("Error saving conversation: {}", e);
+                            }
+                            continue;
+                        }
+                        "/saveall" => {
+                            if let Err(e) = chatbot.save_all_history() {
+                                println!("Error saving conversation: {}", e);
+                            }
+                            continue;
+                        }
+                        _ => {
+                            println!("Unknown command. Available commands: /save, /saveall");
+                            continue;
+                        }
+                    }
                 }
                 
                 println!("Assistant: ");

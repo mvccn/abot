@@ -1,4 +1,4 @@
-# abot -- another, ai, agent bot
+# abot -- another/ai/agent bot
 CLI chatbot, written in Rust and very fast, support markdown output and use DeepSeek v3 by default. 
 
 ## Features
