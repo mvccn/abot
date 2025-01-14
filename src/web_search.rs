@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures::future::join_all;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use crate::llama::{self, LlamaClient};
-
+use log::{debug, info,warn,error};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CachedDocument {
     url: String,
@@ -24,10 +24,12 @@ pub struct WebSearch {
     conversation_id: String,
     max_results: usize,
     llama: LlamaClient,
+    query: String,
+    use_llama: bool,
 }
 
 impl WebSearch {
-    pub fn new(conversation_id: &str, max_results: usize, llama: LlamaClient) -> Result<Self> {
+    pub async fn new(conversation_id: &str, max_results: usize, llama: LlamaClient) -> Result<Self> {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         let cache_dir = home_dir
@@ -40,12 +42,27 @@ impl WebSearch {
             fs::create_dir_all(&cache_dir)?;
         }
 
+        // Test LLama availability
+        let use_llama = match llama.test_availability().await {
+            Ok(true) => true,
+            Ok(false) => {
+                warn!("LLama service is not available, falling back to simple summaries");
+                false
+            },
+            Err(e) => {
+                warn!("Error testing LLama availability: {}, falling back to simple summaries", e);
+                false
+            }
+        };
+
         Ok(Self {
             client: Client::new(),
             cache_dir,
             conversation_id: conversation_id.to_string(),
             max_results,
             llama,
+            query: String::new(),
+            use_llama,
         })
     }
 
@@ -58,7 +75,7 @@ impl WebSearch {
     async fn fetch_and_cache_url(&self, url: &str) -> Result<CachedDocument> {
         // Validate URL first
         if let Err(e) = Url::parse(url) {
-            println!("Warning: Invalid URL '{}': {}", url, e);
+            error!("Warning: Invalid URL '{}': {}", url, e);
             return Err(anyhow::anyhow!("Invalid URL: {}", e));
         }
 
@@ -81,7 +98,7 @@ impl WebSearch {
         let response = match self.client.get(url).send().await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Error fetching URL '{}': {}", url, e);
+                error!("Error fetching URL '{}': {}", url, e);
                 return Err(anyhow::anyhow!("Failed to fetch URL: {}", e));
             }
         }
@@ -115,32 +132,39 @@ impl WebSearch {
             .join("\n");
 
         // Add debug output
-        println!("\n=== Content from {} ===", url);
-        println!("{}\n=== End of content ===\n", content);
+        #[cfg(debug_assertions)]
+        {
+            debug!("Content from {}: {}", url, content);
+        }
 
-        // Replace the simple summary with LLM-generated summary
-        let summary_prompt = vec![llama::Message {
-            role: "user".to_string(),
-            content: format!(
-                "Please provide a brief, factual summary of the following text in 2-3 sentences:\n\n{}",
-                content
-            ),
-        }];
-        
-        let summary = match self.llama.generate(&summary_prompt).await {
-            Ok(response) => {
-                match LlamaClient::get_response_text(response).await {
-                    Ok(text) => text,
-                    Err(e) => {
-                        println!("Warning: Failed to parse LLM response: {}. Using fallback.", e);
-                        content.chars().take(1000).collect::<String>().trim().to_string()
+        // Modify the summary generation to check use_llama flag
+        let summary = if self.use_llama {
+            let summary_prompt = vec![llama::Message {
+                role: "user".to_string(),
+                content: format!(
+                    "Please provide a brief, factual summary of the following text in 2-3 sentences:\n\n{}",
+                    content
+                ),
+            }];
+            
+            match self.llama.generate(&summary_prompt).await {
+                Ok(response) => {
+                    match LlamaClient::get_response_text(response).await {
+                        Ok(text) => text,
+                        Err(e) => {
+                            error!("Warning: Failed to parse LLM response: {}. Using fallback.", e);
+                            content.chars().take(500).collect::<String>().trim().to_string()
+                        }
                     }
+                },
+                Err(e) => {
+                    error!("Warning: Failed to generate LLM summary: {}. Using fallback.", e);
+                    content.chars().take(500).collect::<String>().trim().to_string()
                 }
-            },
-            Err(e) => {
-                println!("Warning: Failed to generate LLM summary: {}. Using fallback.", e);
-                content.chars().take(1000).collect::<String>().trim().to_string()
             }
+        } else {
+            // Simple fallback summary when LLama is not available
+            content.chars().take(500).collect::<String>().trim().to_string()
         };
 
         let cached_doc = CachedDocument {
@@ -161,18 +185,27 @@ impl WebSearch {
         Ok(cached_doc)
     }
 
-    pub async fn search(&self, query: &str) -> Result<String> {
+    pub async fn search(&mut self, query: &str) -> Result<String> {
+        #[cfg(debug_assertions)]
+        debug!("Starting search with query: {}", query);
+
+        //save the query to self
+        self.query = query.to_string();
+
         let search_url = format!(
             "https://html.duckduckgo.com/html/?q={}",
             urlencoding::encode(query)
         );
       
-        println!("Fetching search results from DuckDuckGo...");
+        info!("Fetching search results from DuckDuckGo...");
         let response = self.client.get(&search_url)
             .send()
             .await?
             .text()
             .await?;
+
+        #[cfg(debug_assertions)]
+        debug!("Raw DuckDuckGo response length: {} bytes", response.len());
 
         let document = Html::parse_document(&response);
         
@@ -183,13 +216,25 @@ impl WebSearch {
         
         let mut search_results = Vec::new();
         
+        #[cfg(debug_assertions)]
+        let mut result_count = 0;
+        
         // Iterate directly over all result__extras elements
         for result in document.select(&results_selector) {
+            #[cfg(debug_assertions)]
+            {
+                result_count += 1;
+                debug!("Processing search result #{}", result_count);
+            }
+
             let encoded_url = result
                 .select(&url_selector)
                 .next()
                 .and_then(|el| Some(el.text().collect::<String>()))
                 .unwrap_or_default();
+
+            #[cfg(debug_assertions)]
+            debug!("Found encoded URL: {}", encoded_url);
 
             // Extract the real URL by finding the uddg parameter
             let mut real_url = if encoded_url.contains("uddg=") {
@@ -206,7 +251,7 @@ impl WebSearch {
 			real_url = real_url.split_whitespace().collect::<String>();
             real_url = format!("https://{}", real_url);
 
-            println!("Real URL: {}", real_url);
+            info!("Fetching from: {}", real_url);
 
             let snippet = result
                 .select(&snippet_selector)
@@ -214,18 +259,27 @@ impl WebSearch {
                 .map(|el| el.text().collect::<String>())
                 .unwrap_or_default();
                 
+            #[cfg(debug_assertions)]
+            debug!("Result snippet: {}", snippet);
+
             if !real_url.is_empty() {
                 search_results.push((real_url, snippet));
             }
         }
 
-        println!("Found {} search results", search_results.len());
+        info!("Found {} search results", search_results.len());
+
+        #[cfg(debug_assertions)]
+        {
+            debug!("Search results: {:#?}", search_results);
+            debug!("Limiting results to max_results: {}", self.max_results);
+        }
         
-        // Create futures for all URLs (limit to first 3)
+        // featch and cache all URLs (limit to first max_results) in search results.
         let fetch_futures: Vec<_> = search_results.iter()
             .take(self.max_results)
             .map(|(url, _)| {
-                println!("Fetching content from: {}", url);
+                debug!("Fetching content from: {}", url);
                 self.fetch_and_cache_url(url)
             })
             .collect();
@@ -248,6 +302,9 @@ impl WebSearch {
             })
             .collect::<Vec<_>>()
             .join("\n");
+
+        #[cfg(debug_assertions)]
+        debug!("Final processed summaries length: {} bytes", summaries.len());
 
         println!("Search completed successfully!");
         Ok(summaries)

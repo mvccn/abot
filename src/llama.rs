@@ -190,6 +190,29 @@ impl LlamaClient {
 
         Self::new(model_config)
     }
+
+    pub async fn test_availability(&self) -> Result<bool> {
+        let test_message = vec![Message {
+            role: "user".to_string(),
+            content: "test".to_string(),
+        }];
+
+        match self.generate(&test_message).await {
+            Ok(response) => {
+                // Check if the response status is successful
+                if response.status().is_success() {
+                    Ok(true)
+                } else {
+                    warn!("LLM service returned unsuccessful status: {}", response.status());
+                    Ok(false)
+                }
+            },
+            Err(e) => {
+                warn!("Failed to connect to LLM service: {}", e);
+                Ok(false)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -5,14 +5,16 @@ use serde_json::Value;
 use termimad::MadSkin;
 use crossterm::{
     execute,
-    terminal::{Clear, ClearType},
-    cursor,
+    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    cursor::{self, MoveTo},
+    event::{self, Event, KeyCode, KeyEvent},
+    style::{Color, SetForegroundColor, ResetColor},
 };
 use std::io::{stdout, Write};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use uuid::Uuid;
-use log::{debug, info, warn, error};
+use log::{trace, debug, info, warn, error};
 mod web_search;
 mod llama;
 use web_search::WebSearch;
@@ -180,7 +182,7 @@ impl Config {
 }
 
 impl ChatBot {
-    fn new(config: Config) -> Result<Self> {
+    async fn new(config: Config) -> Result<Self> {
         let conversation_id = Uuid::new_v4().to_string();
         
         // Create conversation directory
@@ -201,7 +203,7 @@ impl ChatBot {
             &conversation_id, 
             config.web_search.result_limit,
             llama_client_for_search
-        )?;
+        ).await?;
 
         // Create main LlamaClient with default provider
         let llama_client = llama::LlamaClient::new(config.deepseek.clone())?;
@@ -297,7 +299,7 @@ impl ChatBot {
 
                 #[cfg(debug_assertions)]
                 {
-                    debug!("Chunk: {}", chunk_str);
+                    trace!("Chunk: {}", chunk_str);
                 }
                 
                 for line in chunk_str.lines() {
@@ -443,61 +445,226 @@ impl ChatBot {
         }
         Ok(())
     }
+
+    fn add_system_notification(&mut self, message: &str) {
+        self.add_message("system", message);
+        self.draw_messages().unwrap_or_else(|e| eprintln!("Failed to draw messages: {}", e));
+    }
+
+    async fn handle_command(&mut self, command: &str) -> Result<bool> {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            return Ok(false);
+        }
+
+        match parts[0] {
+            "/save" => {
+                self.save_last_interaction()?;
+                self.add_system_notification("Last interaction saved successfully.");
+                Ok(true)
+            },
+            "/saveall" => {
+                self.save_all_history()?;
+                self.add_system_notification("Full conversation history saved successfully.");
+                Ok(true)
+            },
+            "/model" => {
+                if parts.len() < 2 {
+                    self.add_system_notification("Usage: /model <provider>\nAvailable providers: deepseek, openai, llamacpp, ollama");
+                    Ok(true)
+                } else {
+                    self.set_provider(parts[1])?;
+                    self.add_system_notification(&format!("Switched to provider: {}", parts[1]));
+                    Ok(true)
+                }
+            },
+            "/help" => {
+                self.add_system_notification(
+                    "Available commands:\n\
+                     /save     - Save the last interaction\n\
+                     /saveall  - Save the entire conversation history\n\
+                     /model    - Change the AI model provider\n\
+                     /help     - Show this help message\n\
+                     /quit     - Exit the application"
+                );
+                Ok(true)
+            },
+            "/quit" | "/exit" => Ok(false),
+            _ => Ok(false)  // Not a command
+        }
+    }
+
+    async fn run(&mut self) -> Result<()> {
+        execute!(stdout(), EnterAlternateScreen)?;
+        terminal::enable_raw_mode()?;
+        
+        self.draw_ui()?;
+        
+        let mut input = String::new();
+        let mut continue_running = true;
+        
+        while continue_running {
+            self.draw_input_prompt(&input)?;
+            
+            if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+                match code {
+                    KeyCode::Enter => {
+                        if input.trim().is_empty() {
+                            continue;
+                        }
+                        
+                        if input.starts_with('/') {
+                            // Handle commands
+                            continue_running = self.handle_command(&input).await?;
+                            input.clear();
+                            self.draw_messages()?;
+                        } else {
+                            // Handle regular chat message
+                            self.add_message("user", &input);
+                            self.draw_messages()?;
+                            self.send_message(&input).await?;
+                            input.clear();
+                        }
+                    },
+                    KeyCode::Char(c) => {
+                        input.push(c);
+                    },
+                    KeyCode::Backspace => {
+                        input.pop();
+                    },
+                    KeyCode::Esc => {
+                        continue_running = false;
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        terminal::disable_raw_mode()?;
+        execute!(stdout(), LeaveAlternateScreen)?;
+        
+        Ok(())
+    }
+    
+    fn draw_ui(&self) -> Result<()> {
+        execute!(
+            stdout(),
+            Clear(ClearType::All),
+            MoveTo(0, 0)
+        )?;
+        
+        let (cols, rows) = terminal::size()?;
+        execute!(
+            stdout(),
+            MoveTo(0, rows - 2),
+            SetForegroundColor(Color::DarkGrey),
+        )?;
+        print!("{}", "─".repeat(cols as usize));
+        execute!(stdout(), ResetColor)?;
+        
+        self.draw_messages()?;
+        Ok(())
+    }
+    
+    fn draw_input_prompt(&self, input: &str) -> Result<()> {
+        let (_, rows) = terminal::size()?;
+        execute!(
+            stdout(),
+            MoveTo(0, rows - 1),
+            Clear(ClearType::CurrentLine),
+        )?;
+        print!("You: {}", input);
+        stdout().flush()?;
+        Ok(())
+    }
+    
+    fn draw_messages(&self) -> Result<()> {
+        let (cols, rows) = terminal::size()?;
+        let available_rows = rows as usize - 3; // Reserve bottom rows for input
+        
+        execute!(
+            stdout(),
+            MoveTo(0, 0),
+            Clear(ClearType::FromCursorDown)
+        )?;
+        
+        let skin = Self::create_custom_skin();
+        
+        // Skip initial system prompt but show other system messages
+        let visible_messages = self.history.iter()
+            .skip(1) // Skip initial system prompt
+            .rev() // Start from most recent
+            .take(available_rows / 2) // Rough estimate of messages that will fit
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev();
+        
+        for message in visible_messages {
+            execute!(stdout(), MoveTo(0, cursor::position()?.1))?; // Move to the start of the line
+            // Print role prefix with appropriate color
+            let prefix_color = match message.role.as_str() {
+                "system" => Color::DarkGrey,
+                _ => Color::Yellow,
+            };
+            
+            execute!(stdout(), SetForegroundColor(prefix_color))?;
+            print!("{}: ", message.role);
+            execute!(stdout(), ResetColor)?;
+            
+            // Get current cursor position after the prefix
+            let (prefix_x, _) = cursor::position()?;
+            
+            // Trim content and split into lines
+            let content = message.content.trim();
+            let lines: Vec<&str> = content.split('\n').collect();
+            
+            // Print each line with proper indentation
+            for (i, line) in lines.iter().enumerate() {
+                if i > 0 {
+                    // For subsequent lines, move to the next line and add indentation
+                    execute!(stdout(), MoveTo(prefix_x, cursor::position()?.1 + 1))?;
+                }
+                skin.print_text(line);
+            }
+            
+            // Add an empty line after each message
+            println!();
+        }
+        
+        Ok(())
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    env_logger::Builder::from_default_env()
+        .format(|buf, record| {
+            let level_color = match record.level() {
+                log::Level::Error => "\x1b[1;31m", // Bold Red
+                log::Level::Warn => "\x1b[1;33m",  // Bold Yellow
+                log::Level::Info => "\x1b[1;32m",  // Bold Green
+                log::Level::Debug => "\x1b[1;34m", // Bold Blue
+                log::Level::Trace => "\x1b[1;35m", // Bold Purple
+            };
+            let reset = "\x1b[0m";
+
+            writeln!(buf,
+                "[{}{}{} {}:{}] {}",
+                level_color,
+                record.level(),
+                reset,
+                // record.target(),
+                record.file().unwrap_or("unknown"),
+                record.line().unwrap_or(0),
+                record.args()
+            )
+        })
+        .init();
     let config = Config::load()?;
-    let mut chatbot = ChatBot::new(config)?;
-    let mut rl = DefaultEditor::new()?;
-
-    println!("Welcome to the Abot! Type 'quit' or 'exit' to exit.");
+    let mut chatbot = ChatBot::new(config).await?;
     
-    loop {
-        let readline = rl.readline("You: ");
-        match readline {
-            Ok(line) => {
-                let line = line.trim();
-                if line.eq_ignore_ascii_case("quit") || line.eq_ignore_ascii_case("exit") {
-                    break;
-                }
-                
-                // Handle commands
-                if line.starts_with('/') {
-                    match line.split_whitespace().next().unwrap() {
-                        "/save" => {
-                            if let Err(e) = chatbot.save_last_interaction() {
-                                println!("Error saving conversation: {}", e);
-                            }
-                        }
-                        "/saveall" => {
-                            if let Err(e) = chatbot.save_all_history() {
-                                println!("Error saving conversation: {}", e);
-                            }
-                        }
-                        "/model" => {
-                            match line.split_whitespace().nth(1) {
-                                Some(provider) => {
-                                    match chatbot.set_provider(provider) {
-                                        Ok(_) => (),
-                                        Err(e) => println!("Error setting provider: {}", e),
-                                    }
-                                }
-                                None => println!("Available providers: deepseek, openai, llamacpp, ollama\nCurrent provider: {}", chatbot.current_provider),
-                            }
-                        }
-                        _ => println!("Unknown command. Available commands: /save, /saveall, /model"),
-                    }
-                    continue;
-                }
-                
-                println!("Assistant: ");
-                chatbot.send_message(&line).await?;
-            }
-            Err(_) => break,
-        }
-    }
-
+    // Run the chat interface
+    chatbot.run().await?;
+    
     Ok(())
 }
