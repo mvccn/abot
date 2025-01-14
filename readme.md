@@ -5,6 +5,10 @@ CLI chatbot, written in Rust and very fast, support markdown output and use Deep
 - Fast and responsive CLI interface
 - Render to markdown for code blocks and formatting
 - Streaming responses
+- save/saveall:
+     save last conversation or save all the conversation by /save or /saveall
+- search web:
+    search web by add @web in your message
 
 ## Installation
 

@@ -27,6 +27,9 @@ urlencoding = "2.1"
 percent-encoding = "2.3"
 chrono = "0.4"
 pulldown-cmark = "0.8"
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.10"
 
 [[bin]]
 name = "abot"

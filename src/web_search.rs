@@ -2,13 +2,13 @@ use anyhow::Result;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
 use std::path::PathBuf;
 use std::fs;
 use url::Url;
 use std::time::{SystemTime, UNIX_EPOCH};
 use futures::future::join_all;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
+use crate::llama::{self, LlamaClient};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CachedDocument {
@@ -23,10 +23,11 @@ pub struct WebSearch {
     cache_dir: PathBuf,
     conversation_id: String,
     max_results: usize,
+    llama: LlamaClient,
 }
 
 impl WebSearch {
-    pub fn new(conversation_id: &str, max_results: usize) -> Result<Self> {
+    pub fn new(conversation_id: &str, max_results: usize, llama: LlamaClient) -> Result<Self> {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         let cache_dir = home_dir
@@ -35,14 +36,16 @@ impl WebSearch {
             .join(conversation_id)
             .join("web_cache");
 
-        // Create all parent directories recursively
-        fs::create_dir_all(&cache_dir)?;
+        if !cache_dir.exists() {
+            fs::create_dir_all(&cache_dir)?;
+        }
 
         Ok(Self {
             client: Client::new(),
             cache_dir,
             conversation_id: conversation_id.to_string(),
             max_results,
+            llama,
         })
     }
 
@@ -115,12 +118,30 @@ impl WebSearch {
         println!("\n=== Content from {} ===", url);
         println!("{}\n=== End of content ===\n", content);
 
-        // Create summary (first 1000 chars of meaningful content)
-        let summary = content.chars()
-            .take(1000)
-            .collect::<String>()
-            .trim()
-            .to_string();
+        // Replace the simple summary with LLM-generated summary
+        let summary_prompt = vec![llama::Message {
+            role: "user".to_string(),
+            content: format!(
+                "Please provide a brief, factual summary of the following text in 2-3 sentences:\n\n{}",
+                content
+            ),
+        }];
+        
+        let summary = match self.llama.generate(&summary_prompt).await {
+            Ok(response) => {
+                match LlamaClient::get_response_text(response).await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        println!("Warning: Failed to parse LLM response: {}. Using fallback.", e);
+                        content.chars().take(1000).collect::<String>().trim().to_string()
+                    }
+                }
+            },
+            Err(e) => {
+                println!("Warning: Failed to generate LLM summary: {}. Using fallback.", e);
+                content.chars().take(1000).collect::<String>().trim().to_string()
+            }
+        };
 
         let cached_doc = CachedDocument {
             url: url.to_string(),

@@ -1,9 +1,7 @@
 use anyhow::Result;
 use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use rustyline::DefaultEditor;
-use serde_json::{json, Value};
-// use termimad::crossterm::style::Stylize;
+use serde_json::Value;
 use termimad::MadSkin;
 use crossterm::{
     execute,
@@ -14,72 +12,128 @@ use std::io::{stdout, Write};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use uuid::Uuid;
+use log::{debug, info, warn, error};
 mod web_search;
+mod llama;
 use web_search::WebSearch;
 
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct WebSearchConfig {
+    result_limit: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Config {
+    default: DefaultConfig,
+    default_provider: String,
+    deepseek: ModelConfig,
+    openai: ModelConfig,
+    llamacpp: ModelConfig,
+    ollama: ModelConfig,
+    web_search: WebSearchConfig,
+}
+
 struct ChatBot {
-    client: reqwest::Client,
-    history: Vec<Message>,
-    api_key: String,
+    history: Vec<llama::Message>,
     config: Config,
+    current_provider: String,
+    llama_client: llama::LlamaClient,
     web_search: WebSearch,
     conversation_id: String,
 }
 
-#[derive(Clone, serde::Serialize)]
-struct Message {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Config {
-    deepseek: DeepseekConfig,
-    ollama: OllamaConfig,
-    initial_prompt: String,
-    web_search: WebSearchConfig,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct DeepseekConfig {
-    api_key: Option<String>,
-    model: String,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct DefaultConfig {
     temperature: f32,
     max_tokens: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct OllamaConfig {
-    url: String,
-    model: String,
-    temperature: f32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct WebSearchConfig {
-    result_limit: usize,
+    stream: bool,
+    initial_prompt: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            deepseek: DeepseekConfig {
-                api_key: Some(String::from("Your deepseek key")),
-                model: String::from("deepseek-chat"),
+            default: DefaultConfig {
                 temperature: 0.7,
                 max_tokens: 2000,
+                stream: true,
+                initial_prompt: String::from("You are a helpful AI assistant."),
             },
-            ollama: OllamaConfig {
-                url: String::from("http://localhost:11434"),
-                model: String::from("llama2"),
-                temperature: 0.7,
+            default_provider: String::from("deepseek"),
+            deepseek: ModelConfig {
+                api_url: String::from("https://api.deepseek.com/v1/chat/completions"),
+                api_key: Some(String::from("your-deepseek-key")),
+                model: String::from("deepseek-chat"),
+                temperature: None,  // Will use default
+                max_tokens: None,   // Will use default
+                stream: None,       // Will use default
             },
-            initial_prompt: String::from(
-                "You are an intelligent AI assistant. Please be concise and helpful in your responses."
-            ),
+            openai: ModelConfig {
+                api_url: String::from("https://api.openai.com/v1/chat/completions"),
+                api_key: Some(String::from("your-openai-key")),
+                model: String::from("gpt-3.5-turbo"),
+                temperature: None,
+                max_tokens: None,
+                stream: None,
+            },
+            llamacpp: ModelConfig {
+                api_url: String::from("http://localhost:8080/v1/chat/completions"),
+                api_key: None,
+                model: String::from("phi4"),
+                temperature: None,
+                max_tokens: None,
+                stream: None,
+            },
+            ollama: ModelConfig {
+                api_url: String::from("http://localhost:11434/api/chat"),
+                api_key: None,
+                model: String::from("mistral"),
+                temperature: None,
+                max_tokens: None,
+                stream: None,
+            },
             web_search: WebSearchConfig {
                 result_limit: 10,
             },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ModelConfig {
+    api_url: String,
+    api_key: Option<String>,
+    model: String,
+    temperature: Option<f32>,
+    max_tokens: Option<u32>,
+    stream: Option<bool>,
+}
+
+impl ModelConfig {
+    fn get_temperature(&self, defaults: &DefaultConfig) -> f32 {
+        self.temperature.unwrap_or(defaults.temperature)
+    }
+
+    fn get_max_tokens(&self, defaults: &DefaultConfig) -> u32 {
+        self.max_tokens.unwrap_or(defaults.max_tokens)
+    }
+
+    fn get_stream(&self, defaults: &DefaultConfig) -> bool {
+        self.stream.unwrap_or(defaults.stream)
+    }
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            api_url: String::new(),
+            api_key: None,
+            model: String::new(),
+            temperature: None,
+            max_tokens: None,
+            stream: None,
         }
     }
 }
@@ -127,10 +181,6 @@ impl Config {
 
 impl ChatBot {
     fn new(config: Config) -> Result<Self> {
-        let api_key = config.deepseek.api_key.clone()
-            .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
-            .ok_or_else(|| anyhow::anyhow!("API key must be set in config or DEEPSEEK_API_KEY environment variable"))?;
-
         let conversation_id = Uuid::new_v4().to_string();
         
         // Create conversation directory
@@ -142,25 +192,38 @@ impl ChatBot {
         if !cache_dir.exists() {
             fs::create_dir_all(&cache_dir)?;
         }
-        
-        let web_search = WebSearch::new(&conversation_id, config.web_search.result_limit)?;
+
+        // Create a LlamaClient for web search
+        let llama_config = config.llamacpp.clone();
+        let llama_client_for_search = llama::LlamaClient::new(llama_config)?;
+
+        let web_search = WebSearch::new(
+            &conversation_id, 
+            config.web_search.result_limit,
+            llama_client_for_search
+        )?;
+
+        // Create main LlamaClient with default provider
+        let llama_client = llama::LlamaClient::new(config.deepseek.clone())?;
 
         let mut bot = Self {
-            client: reqwest::Client::new(),
             history: Vec::new(),
-            api_key,
-            config,
+            current_provider: config.default_provider.clone(),
+            llama_client,
+            config: config.clone(),
             web_search,
             conversation_id,
         };
 
-        let initial_prompt = bot.config.initial_prompt.clone();
+        // Add initial system prompt
+        let initial_prompt = bot.config.default.initial_prompt.clone();
         bot.add_message("system", &initial_prompt);
+        
         Ok(bot)
     }
 
     fn add_message(&mut self, role: &str, content: &str) {
-        self.history.push(Message {
+        self.history.push(llama::Message {
             role: role.to_string(),
             content: content.to_string(),
         });
@@ -179,21 +242,16 @@ impl ChatBot {
     }
 
     async fn send_message(&mut self, message: &str) -> Result<()> {
-        let (is_ollama, is_web_search) = (
-            message.contains("#ollama"),
-            message.contains("@web")
-        );
+        let is_web_search = message.contains("@web");
 
         let query = message
-        .split_whitespace()
-        .filter(|word| !word.starts_with('#') && !word.starts_with('@'))
-        .collect::<Vec<_>>()
-        .join(" ");
+            .split_whitespace()
+            .filter(|word| !word.starts_with('#') && !word.starts_with('@'))
+            .collect::<Vec<_>>()
+            .join(" ");
 
         let message = if is_web_search {
-            // Display a message indicating a web search is being performed
             println!("Performing a web search for: '{}'", query);
-
             let web_results = self.web_search.search(&query).await?;
             format!(
                 "Based on the following web search results, please answer the question: '{}'\n\nSearch Results:\n{}",
@@ -205,120 +263,105 @@ impl ChatBot {
         };
 
         self.add_message("user", &message);
-
-        let headers = {
-            let mut headers = HeaderMap::new();
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            if !is_ollama {
-                headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", self.api_key))?);
+        
+        // Add debug print for request
+        // println!("Sending request to: {}", self.llama_client.config.api_url);
+        
+        // Pass the entire history to generate
+        let response = match self.llama_client.generate(&self.history).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("Error generating response: {}", e);
+                return Err(e);
             }
-            headers
         };
+        
+        if self.config.default.stream {
+            // Handle streaming response
+            let mut stream = response.bytes_stream();
+            let mut current_message = String::new();
+            let mut current_block = String::new();
+            let mut rendered_length = 0;
+            let mut _lines_printed = 0;
+            let skin = Self::create_custom_skin();
 
-        let url = if is_ollama {
-            format!("{}/api/chat", self.config.ollama.url)
-        } else {
-            "https://api.deepseek.com/v1/chat/completions".to_string()
-        };
+            // Print the Assistant prefix and get initial cursor position
+            print!("Assistant: ");
+            stdout().flush()?;
+            let mut initial_position = cursor::position()?;
+            println!();  // Move to next line after the prefix
 
-        let payload = if is_ollama {
-            json!({
-                "model": self.config.ollama.model,
-                "messages": self.history,
-                "stream": true,
-                "temperature": self.config.ollama.temperature,
-            })
-        } else {
-            json!({ 
-                "model": self.config.deepseek.model,
-                "messages": self.history,
-                "stream": true,
-                "temperature": self.config.deepseek.temperature,
-                "max_tokens": self.config.deepseek.max_tokens
-            })
-        };
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                let chunk_str = String::from_utf8_lossy(&chunk);
 
-        let response = self.client
-            .post(url)
-            .headers(headers)
-            .json(&payload)
-            .send()
-            .await?;
+                #[cfg(debug_assertions)]
+                {
+                    debug!("Chunk: {}", chunk_str);
+                }
+                
+                for line in chunk_str.lines() {
+                    if line.starts_with("data: ") {
+                        let data = &line["data: ".len()..];
+                        if data == "[DONE]" { continue; }
+                        
+                        if let Ok(json) = serde_json::from_str::<Value>(data) {
+                            if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                                current_message.push_str(content);
+                                current_block.push_str(content);
+                                _lines_printed += content.matches('\n').count();
 
-        let mut stream = response.bytes_stream();
-        let mut current_message = String::new();
-        let mut current_block = String::new();
-        let mut rendered_length = 0;
-        let mut lines_printed = 0;
-        let skin = Self::create_custom_skin();
-
-        // Print the Assistant prefix and get initial cursor position
-        print!("Assistant: ");
-        stdout().flush()?;
-        let mut initial_position = cursor::position()?;
-        println!();  // Move to next line after the prefix
-
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            
-            for line in chunk_str.lines() {
-                if line.starts_with("data: ") {
-                    let data = &line["data: ".len()..];
-                    if data == "[DONE]" { continue; }
-                    
-                    if let Ok(json) = serde_json::from_str::<Value>(data) {
-                        if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
-                            current_message.push_str(content);
-                            current_block.push_str(content);
-                            lines_printed += content.matches('\n').count();
-
-                            if content.contains("\n\n") || content.contains("```") {
-                                // Return to initial position and clear everything below
-                                execute!(
-                                    stdout(),
-                                    cursor::MoveTo(initial_position.0, initial_position.1),
-                                    Clear(ClearType::FromCursorDown)
-                                )?;
-                                
-                                // Print the entire message from the beginning
-                                skin.print_text(&current_message);
-                                rendered_length = current_message.len();
-                                current_block.clear();
-                                
-                                // Update initial_position to the new cursor position
-                                initial_position = cursor::position()?;
-                                lines_printed = 0;
-                                
-                                stdout().flush()?;
-                            } else {
-                                if current_block.len() == content.len() {
-                                    // Start of new block
-                                    execute!(stdout(), cursor::MoveToColumn(0))?;
-                                    lines_printed = 0;
+                                if content.contains("\n\n") || content.contains("```") {
+                                    execute!(
+                                        stdout(),
+                                        cursor::MoveTo(initial_position.0, initial_position.1),
+                                        Clear(ClearType::FromCursorDown)
+                                    )?;
+                                    
+                                    skin.print_text(&current_message);
+                                    rendered_length = current_message.len();
+                                    current_block.clear();
+                                    
+                                    initial_position = cursor::position()?;
+                                    _lines_printed = 0;
+                                    
+                                    stdout().flush()?;
+                                } else {
+                                    if current_block.len() == content.len() {
+                                        execute!(stdout(), cursor::MoveToColumn(0))?;
+                                        _lines_printed = 0;
+                                    }
+                                    print!("{}", content);
+                                    stdout().flush()?;
                                 }
-                                print!("{}", content);
-                                stdout().flush()?;
                             }
                         }
                     }
                 }
             }
+
+            if rendered_length < current_message.len() {
+                execute!(
+                    stdout(),
+                    cursor::MoveTo(initial_position.0, initial_position.1),
+                    Clear(ClearType::FromCursorDown)
+                )?;
+                
+                skin.print_text(&current_message);
+                println!();
+            }
+            
+            self.add_message("assistant", &current_message);
+        } else {
+            // Handle non-streaming response
+            let response_text = llama::LlamaClient::get_response_text(response).await?;
+            println!("Assistant: ");
+            let skin = Self::create_custom_skin();
+            skin.print_text(&response_text);
+            println!();
+            self.add_message("assistant", &response_text);
         }
 
-        // Final render for any remaining content
-        if rendered_length < current_message.len() {
-            execute!(
-                stdout(),
-                cursor::MoveTo(initial_position.0, initial_position.1),
-                Clear(ClearType::FromCursorDown)
-            )?;
-            
-            skin.print_text(&current_message);
-            println!();
-        }
-        
-        self.add_message("assistant", &current_message);
         Ok(())
     }
 
@@ -391,10 +434,20 @@ impl ChatBot {
         println!("Saved full conversation to: {}", filename.display());
         Ok(())
     }
+
+    pub fn set_provider(&mut self, provider: &str) -> Result<()> {
+        // Only create a new client if we're switching to a different provider
+        if self.current_provider != provider {
+            self.llama_client = llama::LlamaClient::set_provider(&self.config, provider)?;
+            self.current_provider = provider.to_string();
+        }
+        Ok(())
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let config = Config::load()?;
     let mut chatbot = ChatBot::new(config)?;
     let mut rl = DefaultEditor::new()?;
@@ -412,24 +465,31 @@ async fn main() -> Result<()> {
                 
                 // Handle commands
                 if line.starts_with('/') {
-                    match line {
+                    match line.split_whitespace().next().unwrap() {
                         "/save" => {
                             if let Err(e) = chatbot.save_last_interaction() {
                                 println!("Error saving conversation: {}", e);
                             }
-                            continue;
                         }
                         "/saveall" => {
                             if let Err(e) = chatbot.save_all_history() {
                                 println!("Error saving conversation: {}", e);
                             }
-                            continue;
                         }
-                        _ => {
-                            println!("Unknown command. Available commands: /save, /saveall");
-                            continue;
+                        "/model" => {
+                            match line.split_whitespace().nth(1) {
+                                Some(provider) => {
+                                    match chatbot.set_provider(provider) {
+                                        Ok(_) => (),
+                                        Err(e) => println!("Error setting provider: {}", e),
+                                    }
+                                }
+                                None => println!("Available providers: deepseek, openai, llamacpp, ollama\nCurrent provider: {}", chatbot.current_provider),
+                            }
                         }
+                        _ => println!("Unknown command. Available commands: /save, /saveall, /model"),
                     }
+                    continue;
                 }
                 
                 println!("Assistant: ");
