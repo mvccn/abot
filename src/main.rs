@@ -327,6 +327,11 @@ impl ChatBot {
                                     
                                     stdout().flush()?;
                                 } else {
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        trace!("content: {}", content);
+                                        trace!("current_block: {}", current_block);
+                                    }
                                     if current_block.len() == content.len() {
                                         execute!(stdout(), cursor::MoveToColumn(0))?;
                                         _lines_printed = 0;
