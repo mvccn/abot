@@ -67,7 +67,7 @@ struct ErrorResponse {
 #[derive(Debug, Clone)]
 pub struct LlamaClient {
     client: Client,
-    config: ModelConfig,
+    pub config: ModelConfig,
 }
 
 unsafe impl Send for LlamaClient {}

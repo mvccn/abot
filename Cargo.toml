@@ -9,6 +9,7 @@ authors = ["Michael Dee"]
 [dependencies]
 anyhow = "1.0"
 futures = "0.3"
+futures-util = "0.3"
 reqwest = { version = "0.11", features = ["json", "stream"] }
 rustyline = "12.0"
 serde_json = "1.0"
@@ -30,6 +31,7 @@ pulldown-cmark = "0.8"
 thiserror = "1.0"
 log = "0.4"
 env_logger = "0.10"
+ratatui = "0.26.1"
 
 [[bin]]
 name = "abot"
