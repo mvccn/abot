@@ -53,36 +53,6 @@ struct Config {
     web_search: WebSearchConfig,
 }
 
-// Define a simple message enum
-#[derive(Debug, Clone)]
-enum Message {
-    Info(String),
-    Error(String),
-}
-
-// Define a simple message bus
-#[derive(Default)]
-struct MessageBus {
-    messages: std::sync::Mutex<Vec<Message>>,
-}
-
-impl MessageBus {
-    fn send(&self, message: Message) {
-        let mut messages = self.messages.lock().unwrap();
-        messages.push(message);
-    }
-
-    fn clear(&self) {
-        let mut messages = self.messages.lock().unwrap();
-        messages.clear();
-    }
-
-    fn get_messages(&self) -> Vec<Message> {
-        let messages = self.messages.lock().unwrap();
-        messages.clone()
-    }
-}
-
 struct ChatBot {
     history: Vec<llama::Message>,
     config: Config,
@@ -90,7 +60,6 @@ struct ChatBot {
     llama_client: llama::LlamaClient,
     web_search: WebSearch,
     conversation_id: String,
-    message_bus: std::sync::Arc<MessageBus>, // Add message bus
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -232,7 +201,7 @@ impl Config {
 type MessageStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
 
 impl ChatBot {
-    async fn new(config: Config, message_bus: std::sync::Arc<MessageBus>) -> Result<Self> {
+    async fn new(config: Config) -> Result<Self> {
         let conversation_id = Uuid::new_v4().to_string();
 
         // Create conversation directory
@@ -253,8 +222,7 @@ impl ChatBot {
             &conversation_id,
             config.web_search.result_limit,
             llama_client_for_search,
-        )
-        .await?;
+        ).await?;
 
         // Create main LlamaClient with default provider
         let llama_client = llama::LlamaClient::new(config.deepseek.clone())?;
@@ -266,7 +234,6 @@ impl ChatBot {
             config: config.clone(),
             web_search,
             conversation_id,
-            message_bus, // Initialize message bus
         };
 
         // Add initial system prompt
@@ -415,8 +382,7 @@ impl ChatBot {
 
     fn save_all_history(&self) -> Result<()> {
         if self.history.is_empty() {
-            self.message_bus
-                .send(Message::Info("No conversation to save yet.".to_string()));
+            info!("No conversation to save yet.");
             return Ok(());
         }
 
@@ -439,11 +405,7 @@ impl ChatBot {
         }
 
         fs::write(&filename, content)?;
-
-        self.message_bus.send(Message::Info(format!(
-            "Saved full conversation to: {}",
-            filename.display()
-        )));
+        info!("Saved full conversation to: {}", filename.display());
 
         Ok(())
     }
@@ -486,14 +448,12 @@ struct App {
     scroll: usize,          // This will now represent the line number we're scrolled to
     current_response: String,
     info_message: String,
-    message_bus: std::sync::Arc<MessageBus>,
     log_buffer: Arc<Mutex<Vec<String>>>,
     visible_height: u16,
 }
 
 impl App {
     async fn new(config: Config) -> Result<Self> {
-        let message_bus = std::sync::Arc::new(MessageBus::default());
         let log_buffer = Arc::new(Mutex::new(Vec::new()));
         
         // Initialize logger
@@ -505,7 +465,7 @@ impl App {
         log::set_boxed_logger(Box::new(logger))
             .map(|()| log::set_max_level(LevelFilter::Info))?;
 
-        let chatbot = ChatBot::new(config, message_bus.clone()).await?;
+        let chatbot = ChatBot::new(config).await?;
         
         Ok(Self {
             chatbot,
@@ -514,7 +474,6 @@ impl App {
             scroll: 0,
             current_response: String::new(),
             info_message: String::new(),
-            message_bus,
             log_buffer,
             visible_height: 0,
         })
@@ -541,47 +500,9 @@ impl App {
     fn print_info(&mut self, message: String) {
         self.info_message = message;
     }
-
-    fn process_messages(&mut self) {
-        let messages = self.message_bus.get_messages();
-        if let Some(last_message) = messages.last() {
-            self.info_message = match last_message {
-                Message::Info(msg) => format!(
-                    "{}[{}]{}",
-                    "\x1b[32m", // Dark green
-                    msg,
-                    "\x1b[0m" // Reset color
-                ),
-                Message::Error(msg) => format!(
-                    "{}[Error: {}]{}",
-                    "\x1b[31m", // Red
-                    msg,
-                    "\x1b[0m" // Reset color
-                ),
-            };
-            self.message_bus.clear();
-        }
-    }
 }
 
-struct UiWriter {
-    buffer: Arc<Mutex<Vec<String>>>,
-}
 
-impl Write for UiWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Ok(s) = String::from_utf8(buf.to_vec()) {
-            if let Ok(mut buffer) = self.buffer.lock() {
-                buffer.push(s);
-            }
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -719,7 +640,6 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        app.process_messages();
     }
 
     // Restore terminal
