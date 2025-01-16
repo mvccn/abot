@@ -203,10 +203,10 @@ async fn main() -> Result<()> {
                                             if command.len() > 1 {
                                                 let provider = command[1];
                                                 if let Err(e) = app.chatbot.set_provider(provider) {
-                                                    error!("Error setting provider: {}", e);
+                                                    error!("Failed to switch to provider '{}': {}", provider, e);
                                
                                                 } else {
-                                                   info!("Switched to provider: {}", provider);
+                                                   info!("Successfully switched to provider: {}", provider);
                                                 }
                                             } else {
                                                 error!("Usage: /model <provider>");

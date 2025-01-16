@@ -1,7 +1,8 @@
 use anyhow::Result;
 use futures::stream;
 use futures::{Stream, StreamExt};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+use anyhow::Context;
 use serde_json::Value;
 use std::fs;
 use std::pin::Pin;
@@ -111,7 +112,9 @@ impl ChatBot {
             .join(&conversation_id);
 
         if !cache_dir.exists() {
-            fs::create_dir_all(&cache_dir)?;
+            debug!("Creating cache directory: {}", cache_dir.display());
+            fs::create_dir_all(&cache_dir)
+                .with_context(|| format!("Failed to create cache directory at {}", cache_dir.display()))?;
         }
 
         let llama_config = config.llamacpp.clone();
@@ -156,8 +159,9 @@ impl ChatBot {
             .join(" ");
 
         let _message = if is_web_search {
-            info!("Performing a web search for: '{}'", query);
-            let web_results = self.web_search.search(&query).await?;
+            debug!("Performing web search for query: '{}'", query);
+            let web_results = self.web_search.search(&query).await
+                .with_context(|| format!("Failed to perform web search for query: '{}'", query))?;
             format!(
                 "Based on the following web search results, please answer the question: '{}'\n\nSearch Results:\n{}",
                 query,
@@ -167,16 +171,13 @@ impl ChatBot {
             query
         };
 
-        #[cfg(debug_assertions)]
-        {
-            debug!("Sending request to: {}", self.llama_client.config.api_url);
-        }
+        debug!("Sending request to provider: {} at {}", self.current_provider, self.llama_client.config.api_url);
 
         let response = match self.llama_client.generate(&self.conversation.get_raw_messages()).await {
             Ok(resp) => resp,
             Err(e) => {
-                error!("Error generating response: {}", e);
-                return Err(e);
+                error!("Failed to generate response from provider {}: {}", self.current_provider, e);
+                return Err(e).context("Failed to generate response from LLM provider");
             }
         };
 
@@ -216,7 +217,7 @@ impl ChatBot {
 
     pub fn save_last_interaction(&self) -> Result<()> {
         if self.conversation.messages.len() < 2 {
-            info!("No conversation to save yet.");
+            debug!("No conversation to save - not enough messages yet");
             return Ok(());
         }
 
@@ -253,13 +254,13 @@ impl ChatBot {
         );
 
         fs::write(&filename, content)?;
-        info!("Saved conversation to: {}", filename.display());
+        debug!("Saved conversation interaction to: {}", filename.display());
         Ok(())
     }
 
     pub fn save_all_history(&self) -> Result<()> {
         if self.conversation.messages.is_empty() {
-            info!("No conversation to save yet.");
+            debug!("No conversation history to save - conversation is empty");
             return Ok(());
         }
 
@@ -281,7 +282,7 @@ impl ChatBot {
         }
 
         fs::write(&filename, content)?;
-        info!("Saved full conversation to: {}", filename.display());
+        debug!("Saved full conversation history to: {}", filename.display());
 
         Ok(())
     }
