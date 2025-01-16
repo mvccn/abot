@@ -17,7 +17,7 @@ use ratatui::{
     Terminal,
 };
 use std::io::stdout;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 use std::str::FromStr;
 
 mod chatbot;
@@ -120,17 +120,20 @@ impl App {
     }
 }
 
+static INIT: Once = Once::new();
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logger with buffer
     let logger = UiLogger::new(100); // Keep last 100 log messages
     let log_buffer = logger.buffer.clone();
     
-    // Only initialize logger if not already initialized
-    if log::logger().downcast_ref::<UiLogger>().is_none() {
+    // Use a static flag to ensure logger is only initialized once
+    INIT.call_once(|| {
         log::set_boxed_logger(Box::new(logger))
-            .map(|()| log::set_max_level(LevelFilter::Debug))?;
-    }
+            .map(|()| log::set_max_level(LevelFilter::Debug))
+            .expect("Failed to set logger");
+    });
 
     // Setup terminal
     enable_raw_mode()?;
