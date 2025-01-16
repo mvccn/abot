@@ -101,6 +101,7 @@ struct App {
     log_scroll: usize,
     is_log_focused: bool,
     last_log_count: usize,  // Track number of log lines to detect new messages
+    last_message_count: usize,  // Add this new field to track message count
 }
 
 impl App {
@@ -119,6 +120,7 @@ impl App {
             log_scroll: 0,
             is_log_focused: false,
             last_log_count: 0,
+            last_message_count: 0,
         })
     }
 }
@@ -161,6 +163,13 @@ async fn main() -> Result<()> {
         if current_log_count > app.last_log_count {
             app.log_scroll = usize::MAX; // Auto-scroll to bottom
             app.last_log_count = current_log_count;
+        }
+
+        // Check for new messages and auto-scroll if needed
+        let current_message_count = app.chatbot.messages.len();
+        if current_message_count > app.last_message_count {
+            app.scroll = usize::MAX; // Auto-scroll to bottom
+            app.last_message_count = current_message_count;
         }
 
         terminal.draw(|f| ui(f, &mut app))?;
@@ -375,7 +384,11 @@ fn ui(f: &mut Frame, app: &mut App) {
     };
 
     // Clamp scroll value to valid range
-    app.scroll = app.scroll.min(max_scroll);
+    if app.scroll == usize::MAX {
+        app.scroll = max_scroll;
+    } else {
+        app.scroll = app.scroll.min(max_scroll);
+    }
 
     // Create message area with scrollbar space
     let message_area = chunks[0];
