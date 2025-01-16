@@ -68,7 +68,8 @@ impl Log for UiLogger {
                 buffer.drain(0..len - self.max_lines);
             }
             // Notify about new log message
-            if let Some(app) = APP.get_mut() {
+            unsafe {
+                if let Some(app) = APP.as_mut() {
                 app.log_scroll = usize::MAX; // Auto-scroll to bottom
             }
         }
@@ -78,7 +79,7 @@ impl Log for UiLogger {
 }
 
 // Modify App struct to include log buffer
-static APP: std::sync::OnceLock<&'static mut App> = std::sync::OnceLock::new();
+static mut APP: Option<App> = None;
 
 #[derive(Debug)]
 struct App {
@@ -160,13 +161,16 @@ async fn main() -> Result<()> {
             .expect("Failed to set logger");
     });
 
-    // Create app state
+    // Create and store app state
     let config = Config::load()?;
-    let mut app = App::new(config, log_buffer.clone()).await?;
+    let app = App::new(config, log_buffer.clone()).await?;
+    unsafe {
+        APP = Some(app);
+    }
 
     // Main loop
     loop {
-        let app = APP.get_mut().unwrap();
+        let app = unsafe { APP.as_mut().unwrap() };
         // Check for new log messages and auto-scroll if needed
         let current_log_count = log_buffer.lock().unwrap().len();
         if current_log_count > app.last_log_count {
@@ -320,7 +324,10 @@ async fn main() -> Result<()> {
                             }
                         }
                         KeyCode::Tab => {
-                            APP.get_mut().unwrap().is_log_focused = !APP.get_mut().unwrap().is_log_focused;
+                            unsafe {
+                                let app = APP.as_mut().unwrap();
+                                app.is_log_focused = !app.is_log_focused;
+                            }
                             if app.is_log_focused {
                                 // Auto-scroll to bottom when focusing logs
                                 app.log_scroll = usize::MAX;
