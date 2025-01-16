@@ -83,7 +83,7 @@ impl App {
             if last_msg.role == "assistant" {
                 // Update both raw and rendered content
                 last_msg.raw_content = self.current_response.clone();
-                last_msg.rendered_content = markdown::markdown_to_lines(&self.current_response, &self.chatbot.conversation.skin);
+                last_msg.rendered_content = markdown::markdown_to_lines(&self.current_response);
                 
                 // Auto-scroll to bottom when updating response
                 self.scroll = usize::MAX; // This will be clamped to max_scroll in ui()

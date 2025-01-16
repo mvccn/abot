@@ -10,8 +10,6 @@ use crate::llama;
 use crate::web_search::WebSearch;
 use bytes::Bytes;
 use crate::config::{Config, ModelConfig};
-use termimad::MadSkin;
-
 #[derive(Debug)]
 struct Message {
     role: String,
@@ -20,9 +18,9 @@ struct Message {
 }
 
 impl Message {
-    fn new(role: &str, content: &str, skin: &MadSkin) -> Self {
+    fn new(role: &str, content: &str) -> Self {
         let rendered = if role == "assistant" {
-            markdown::markdown_to_lines(content, skin)
+            markdown::markdown_to_lines(content)
         } else {
             vec![Line::from(content.to_string())]
         };
@@ -38,14 +36,12 @@ impl Message {
 #[derive(Debug)]
 pub struct Conversation {
     messages: Vec<Message>,
-    skin: MadSkin,
 }
 
 impl Conversation {
-    fn new(skin: MadSkin) -> Self {
+    fn new() -> Self {
         Self {
             messages: Vec::new(),
-            skin,
         }
     }
 
@@ -122,9 +118,8 @@ impl ChatBot {
 
         let llama_client = llama::LlamaClient::new(config.deepseek.clone())?;
 
-        let skin = Self::create_custom_skin();
         let mut bot = Self {
-            conversation: Conversation::new(skin),
+            conversation: Conversation::new(),
             current_provider: config.default_provider.clone(),
             llama_client,
             config: config.clone(),
@@ -142,17 +137,6 @@ impl ChatBot {
         self.conversation.add_message(role, content);
     }
 
-    pub fn create_custom_skin() -> termimad::MadSkin {
-        let mut skin = termimad::MadSkin::default();
-        skin.set_headers_fg(termimad::rgb(255, 187, 0));
-        skin.bold.set_fg(termimad::rgb(255, 187, 0));
-        skin.italic.set_fg(termimad::rgb(215, 255, 135));
-        skin.bullet.set_fg(termimad::rgb(255, 187, 0));
-        skin.code_block.set_fg(termimad::rgb(187, 187, 187));
-        skin.code_block.set_bg(termimad::rgb(45, 45, 45));
-        skin.quote_mark.set_fg(termimad::rgb(150, 150, 150));
-        skin
-    }
 
     pub async fn send_message(&mut self, message: &str) -> Result<MessageStream> {
         self.add_message("user", message);
