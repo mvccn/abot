@@ -92,7 +92,7 @@ impl ChatBot {
             .join(" ");
 
         let _message = if is_web_search {
-            println!("Performing a web search for: '{}'", query);
+            info!("Performing a web search for: '{}'", query);
             let web_results = self.web_search.search(&query).await?;
             format!(
                 "Based on the following web search results, please answer the question: '{}'\n\nSearch Results:\n{}",
@@ -111,7 +111,7 @@ impl ChatBot {
         let response = match self.llama_client.generate(&self.history).await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Error generating response: {}", e);
+                error!("Error generating response: {}", e);
                 return Err(e);
             }
         };
@@ -152,7 +152,7 @@ impl ChatBot {
 
     pub fn save_last_interaction(&self) -> Result<()> {
         if self.history.len() < 2 {
-            println!("No conversation to save yet.");
+            info!("No conversation to save yet.");
             return Ok(());
         }
 
@@ -189,7 +189,7 @@ impl ChatBot {
         );
 
         fs::write(&filename, content)?;
-        println!("Saved conversation to: {}", filename.display());
+        info!("Saved conversation to: {}", filename.display());
         Ok(())
     }
 

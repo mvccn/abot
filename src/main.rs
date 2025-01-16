@@ -27,7 +27,13 @@ mod llama;
 mod web_search;
 mod markdown;
 
-// Add this struct for logging
+// Initialize logger with max level
+let logger = UiLogger {
+    buffer: log_buffer.clone(),
+};
+    
+log::set_boxed_logger(Box::new(logger))
+    .map(|()| log::set_max_level(LevelFilter::Info))?;
 struct UiLogger {
     buffer: Arc<Mutex<Vec<String>>>,
 }

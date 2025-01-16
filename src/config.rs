@@ -121,17 +121,17 @@ impl Config {
         let config_path = config_dir.join("config.toml");
 
         if !config_dir.exists() {
-            println!("Creating config directory: {}", config_dir.display());
+            info!("Creating config directory: {}", config_dir.display());
             fs::create_dir_all(&config_dir)?;
         }
 
         if !config_path.exists() {
-            println!("Creating default config file: {}", config_path.display());
+            info!("Creating default config file: {}", config_path.display());
             let default_config = Config::default();
             let toml = toml::to_string_pretty(&default_config)?;
             fs::write(&config_path, toml)?;
-            println!("Please set your API key in the config file or DEEPSEEK_API_KEY environment variable");
-            println!("You can edit the config file at: {}", config_path.display());
+            info!("Please set your API key in the config file or DEEPSEEK_API_KEY environment variable");
+            info!("You can edit the config file at: {}", config_path.display());
             return Ok(default_config);
         }
 
@@ -140,11 +140,11 @@ impl Config {
         let config: Config = toml::from_str(&config_str)?;
 
         if config.deepseek.api_key.is_none() && std::env::var("DEEPSEEK_API_KEY").is_err() {
-            println!(
-                "Warning: No API key found in config file or DEEPSEEK_API_KEY environment variable"
+            warn!(
+                "No API key found in config file or DEEPSEEK_API_KEY environment variable"
             );
-            println!("Please set your API key in: {}", config_path.display());
-            println!("Or set the DEEPSEEK_API_KEY environment variable");
+            info!("Please set your API key in: {}", config_path.display());
+            info!("Or set the DEEPSEEK_API_KEY environment variable");
         }
 
         Ok(config)
