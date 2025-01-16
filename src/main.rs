@@ -373,8 +373,11 @@ fn ui(f: &mut Frame, app: &mut App) {
         };
         messages_to_display.push(Line::from(vec![prefix]));
         
-        // Add rendered content
-        if message.role == "assistant" {
+        // Show raw content if message starts with /raw
+        if message.raw_content.starts_with("/raw") {
+            let raw_content = message.raw_content.replacen("/raw", "", 1).trim_start().to_string();
+            messages_to_display.push(Line::from(raw_content));
+        } else if message.role == "assistant" {
             messages_to_display.extend(message.rendered_content.clone());
         } else {
             messages_to_display.push(Line::from(message.raw_content.as_str()));
