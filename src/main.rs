@@ -103,6 +103,10 @@ struct App {
     last_log_count: usize,  // Track number of log lines to detect new messages
     last_message_count: usize,  // Add this new field to track message count
     raw_mode: bool,         // Whether to show raw content instead of rendered markdown
+    follow_mode: bool,  // follow mode scrolling: auto scroll to bottom when new content is added,
+                        // but manual scrolling will disable the follow mode
+                        // and re-enable it when we scroll to the bottom
+    is_streaming: bool,  // Add this new field
 }
 
 impl App {
@@ -123,23 +127,35 @@ impl App {
             last_log_count: 0,
             last_message_count: 0,
             raw_mode: false,
+            follow_mode: true,  // Start in follow mode
+            is_streaming: false,  // Initialize the new field
         })
     }
 
     fn handle_input(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::PageUp => {
+            KeyCode::PageUp | KeyCode::Up => {
                 if !self.is_log_focused {
-                    self.scroll = self.scroll.saturating_sub(10);
+                    self.scroll = self.scroll.saturating_sub(if key.code == KeyCode::PageUp { 10 } else { 1 });
+                    // Disable follow mode when manually scrolling up
+                    self.follow_mode = false;
                 }
             }
-            KeyCode::PageDown => {
+            KeyCode::PageDown | KeyCode::Down => {
                 if !self.is_log_focused {
-                    self.scroll = self.scroll.saturating_add(10);
+                    self.scroll = self.scroll.saturating_add(if key.code == KeyCode::PageDown { 10 } else { 1 });
+                    // Re-enable follow mode if we scroll to bottom
+                    if self.is_at_bottom(self.scroll) {
+                        self.follow_mode = true;
+                    }
                 }
             }
-            _ => {}  // Add catch-all pattern for other keys
+            _ => {}
         }
+    }
+
+    fn is_at_bottom(&self, max_scroll: usize) -> bool {
+        self.scroll >= max_scroll.saturating_sub(1)
     }
 }
 
@@ -265,8 +281,10 @@ async fn main() -> Result<()> {
                                     terminal.draw(|f| ui(f, &mut app))?;
                                     match app.chatbot.querry(&input).await {
                                         Ok(mut stream) => {
-                                            app.chatbot.add_message("assistant", ""); // Add empty message that will be updated
+                                            app.chatbot.add_message("assistant", "");
                                             app.current_response.clear();
+                                            app.is_streaming = true;
+                                            terminal.hide_cursor()?;
                                             
                                             while let Some(chunk_result) = stream.next().await {
                                                 match chunk_result {
@@ -274,6 +292,12 @@ async fn main() -> Result<()> {
                                                         if !content.is_empty() {
                                                             app.current_response.push_str(&content);
                                                             app.chatbot.update_last_message(&app.current_response);
+                                                            
+                                                            // Only auto-scroll if in follow mode
+                                                            if app.follow_mode {
+                                                                app.scroll = usize::MAX;
+                                                            }
+                                                            
                                                             terminal.draw(|f| ui(f, &mut app))?;
                                                         }
                                                     }
@@ -284,7 +308,8 @@ async fn main() -> Result<()> {
                                                 }
                                             }
                                             
-                                            // Clear current response after streaming is complete
+                                            app.is_streaming = false;
+                                            terminal.show_cursor()?;
                                             app.current_response.clear();
                                         }
                                         Err(e) => {
@@ -542,10 +567,12 @@ fn ui(f: &mut Frame, app: &mut App) {
         .style(Style::default().add_modifier(Modifier::DIM));  // Makes the text appear less prominent
     f.render_widget(status_bar, chunks[3]);
 
-    // Cursor position
-    let cursor_x = chunks[2].x + 1 + (app.input.len() as u16 % chunks[2].width);
-    let cursor_y = chunks[2].y + 1 + (app.input.len() as u16 / chunks[2].width);
-    f.set_cursor(cursor_x, cursor_y);
+    // Only set cursor position if not streaming
+    if !app.is_streaming {
+        let cursor_x = chunks[2].x + 1 + (app.input.len() as u16 % chunks[2].width);
+        let cursor_y = chunks[2].y + 1 + (app.input.len() as u16 / chunks[2].width);
+        f.set_cursor(cursor_x, cursor_y);
+    }
 
     // Update app's visible height
     app.visible_height = chunks[0].height;

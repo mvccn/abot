@@ -102,14 +102,12 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
             }
             Event::Text(text) => {
                 if code_block {
-                    for line in text.lines() {
-                        if !current_spans.is_empty() {
-                            lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
-                        }
-                        current_spans.push(Span::styled(line.to_string(), current_style));
+                    if !current_spans.is_empty() {
+                        lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                     }
+                    current_spans.push(Span::styled(text.to_string(), current_style));
                 } else {
-                    current_spans.push(Span::styled(text.trim().to_string(), current_style));
+                    current_spans.push(Span::styled(text.to_string(), current_style));
                 }
             }
             Event::Code(text) => {

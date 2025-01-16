@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::stream;
 use futures::{Stream, StreamExt};
-use log::{debug, warn, error, info};
+use log::{debug, error};
 use anyhow::Context;
 use serde_json::Value;
 use std::fs;
@@ -11,7 +11,7 @@ use crate::llama;
 use crate::web_search::WebSearch;
 use bytes::Bytes;
 use crate::config::Config;
-use ratatui::prelude::{Line, Span, Style, Color};
+use ratatui::prelude::Line;
 use crate::markdown;
 
 #[derive(Debug, Clone)]
@@ -110,7 +110,7 @@ impl ChatMessage {
 //     }
 // }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChatBot {
     pub messages: Vec<ChatMessage>,
     config: Config,

@@ -9,7 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures::future::join_all;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use crate::llama::{self, LlamaClient};
-use log::{debug, info,warn,error};
+use log::{debug, info, error};
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CachedDocument {
     url: String,
@@ -18,7 +19,7 @@ pub struct CachedDocument {
     summary: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WebSearch {
     client: Client,
     cache_dir: PathBuf,
