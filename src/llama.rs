@@ -1,14 +1,13 @@
 use anyhow::{Result, Context};
 use reqwest::{
     Client, 
-    StatusCode,
     Response,
     header::{HeaderMap, HeaderValue, CONTENT_TYPE, AUTHORIZATION}
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use crate::chatbot::{Config, ModelConfig};
-use log::{debug, info, warn, error};
+use crate::config::{Config, ModelConfig};
+use log::{debug, warn, error};
 
 #[derive(Debug, Error)]
 pub enum LlamaError {
