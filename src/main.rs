@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
     // Only initialize logger if not already initialized
     if std::any::TypeId::of::<UiLogger>() != std::any::TypeId::of::<dyn Log>() {
         log::set_boxed_logger(Box::new(logger))
-            .map(|()| log::set_max_level(LevelFilter::Info))?;
+            .map(|()| log::set_max_level(LevelFilter::Debug))?;
     }
 
     // Setup terminal
@@ -159,6 +159,7 @@ async fn main() -> Result<()> {
                                                 let logging_level = command[1];
                                                 if let Ok(level) = LevelFilter::from_str(logging_level) {
                                                     log::set_max_level(level);
+                                                    info!("Logging level set to: {}", logging_level);
                                                 } else {
                                                     error!("Invalid logging level: {}", logging_level);
                                                 }
