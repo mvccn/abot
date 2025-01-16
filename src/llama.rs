@@ -176,30 +176,24 @@ impl LlamaClient {
     pub async fn get_response_text(response: Response) -> Result<String> {
         debug!("Parsing LLM response...");
         
-        // First try to parse as Ollama/Llama format
         let response_text = response.text().await?;
+        debug!("Raw response: {}", response_text);
         
-        if let Ok(ollama_response) = serde_json::from_str::<serde_json::Value>(&response_text) {
-            if let Some(response) = ollama_response["response"].as_str() {
+        // Try to parse as OpenAI/Deepseek/Llama.cpp format
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&response_text) {
+            // Check for choices array with message content
+            if let Some(choices) = json["choices"].as_array() {
+                if let Some(first_choice) = choices.first() {
+                    if let Some(message) = first_choice["message"].as_object() {
+                        if let Some(content) = message["content"].as_str() {
+                            return Ok(content.to_string());
+                        }
+                    }
+                }
+            }
+            // Check for direct response field
+            if let Some(response) = json["response"].as_str() {
                 return Ok(response.to_string());
-            }
-            if let Some(message) = ollama_response["message"]["content"].as_str() {
-                return Ok(message.to_string());
-            }
-        }
-        
-        // Try to parse as OpenAI/Deepseek format
-        if let Ok(completion) = serde_json::from_str::<CompletionResponse>(&response_text) {
-            if !completion.response.is_empty() {
-                return Ok(completion.response);
-            }
-            if let Some(choice) = completion.choices.first() {
-                if let Some(message) = &choice.message {
-                    return Ok(message.content.clone());
-                }
-                if let Some(delta) = &choice.delta {
-                    return Ok(delta.content.clone());
-                }
             }
         }
         
