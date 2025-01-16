@@ -10,11 +10,14 @@ use crate::llama;
 use crate::web_search::WebSearch;
 use bytes::Bytes;
 use crate::config::{Config, ModelConfig};
+use ratatui::prelude::{Line, Span, Style, Color};
+use crate::markdown;
+
 #[derive(Debug)]
-struct Message {
-    role: String,
-    raw_content: String,
-    rendered_content: Vec<Line<'static>>,
+pub struct Message {
+    pub role: String,
+    pub raw_content: String,
+    pub rendered_content: Vec<Line<'static>>,
 }
 
 impl Message {
@@ -39,18 +42,18 @@ pub struct Conversation {
 }
 
 impl Conversation {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             messages: Vec::new(),
         }
     }
 
-    fn add_message(&mut self, role: &str, content: &str) {
-        let message = Message::new(role, content, &self.skin);
+    pub fn add_message(&mut self, role: &str, content: &str) {
+        let message = Message::new(role, content);
         self.messages.push(message);
     }
 
-    fn get_rendered_messages(&self) -> Vec<Line<'static>> {
+    pub fn get_rendered_messages(&self) -> Vec<Line<'static>> {
         self.messages.iter()
             .flat_map(|msg| {
                 let mut lines = vec![Line::from(vec![
@@ -69,7 +72,7 @@ impl Conversation {
             .collect()
     }
 
-    fn get_raw_messages(&self) -> Vec<llama::Message> {
+    pub fn get_raw_messages(&self) -> Vec<llama::Message> {
         self.messages.iter()
             .map(|msg| llama::Message {
                 role: msg.role.clone(),
@@ -78,13 +81,13 @@ impl Conversation {
             .collect()
     }
 
-    fn last_message_mut(&mut self) -> Option<&mut Message> {
+    pub fn last_message_mut(&mut self) -> Option<&mut Message> {
         self.messages.last_mut()
     }
 }
 
 pub struct ChatBot {
-    conversation: Conversation,
+    pub conversation: Conversation,
     config: Config,
     pub current_provider: String,
     llama_client: llama::LlamaClient,
@@ -136,7 +139,6 @@ impl ChatBot {
     pub fn add_message(&mut self, role: &str, content: &str) {
         self.conversation.add_message(role, content);
     }
-
 
     pub async fn send_message(&mut self, message: &str) -> Result<MessageStream> {
         self.add_message("user", message);
@@ -209,7 +211,7 @@ impl ChatBot {
     }
 
     pub fn save_last_interaction(&self) -> Result<()> {
-        if self.history.len() < 2 {
+        if self.conversation.messages.len() < 2 {
             info!("No conversation to save yet.");
             return Ok(());
         }
@@ -228,14 +230,14 @@ impl ChatBot {
         let filename = save_dir.join(format!("interaction_{}.md", timestamp));
 
         let last_user_msg = self
-            .history
+            .conversation.messages
             .iter()
             .rev()
             .find(|msg| msg.role == "user")
             .ok_or_else(|| anyhow::anyhow!("No user message found"))?;
 
         let last_assistant_msg = self
-            .history
+            .conversation.messages
             .iter()
             .rev()
             .find(|msg| msg.role == "assistant")
@@ -243,7 +245,7 @@ impl ChatBot {
 
         let content = format!(
             "User:{}\nAssistant:{}\n\n",
-            last_user_msg.content, last_assistant_msg.content
+            last_user_msg.raw_content, last_assistant_msg.raw_content
         );
 
         fs::write(&filename, content)?;
@@ -252,7 +254,7 @@ impl ChatBot {
     }
 
     pub fn save_all_history(&self) -> Result<()> {
-        if self.history.is_empty() {
+        if self.conversation.messages.is_empty() {
             info!("No conversation to save yet.");
             return Ok(());
         }
@@ -270,8 +272,8 @@ impl ChatBot {
         let filename = save_dir.join("saveall.md");
         let mut content = String::new();
 
-        for message in self.history.iter().skip(1) {
-            content.push_str(&format!("{}:{}\n\n", message.role, message.content));
+        for message in self.conversation.messages.iter().skip(1) {
+            content.push_str(&format!("{}:{}\n\n", message.role, message.raw_content));
         }
 
         fs::write(&filename, content)?;

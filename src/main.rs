@@ -8,8 +8,7 @@ use futures::StreamExt;
 use log::{LevelFilter, Log, Metadata, Record, info, error};
 use ratatui::{
     prelude::*,
-    style::{Color, Style},
-    text::{Line, Span},
+    style::Style,
     widgets::{
         Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
         BorderType,
@@ -18,6 +17,7 @@ use ratatui::{
 };
 use std::io::stdout;
 use std::sync::{Arc, Mutex};
+use std::str::FromStr;
 
 mod chatbot;
 mod config;
@@ -149,6 +149,21 @@ async fn main() -> Result<()> {
                      
                                             }
                                         }
+                                        //add /quit or /exit to quit the app
+                                        "quit" | "exit" => {
+                                            break;
+                                        }
+                                        //add /log logging_level to set the logging level
+                                        "log" => {
+                                            if command.len() > 1 {
+                                                let logging_level = command[1];
+                                                if let Ok(level) = LevelFilter::from_str(logging_level) {
+                                                    log::set_max_level(level);
+                                                } else {
+                                                    error!("Invalid logging level: {}", logging_level);
+                                                }
+                                            }
+                                        }
                                         "saveall" => {
                                             if let Err(e) = app.chatbot.save_all_history() {
                                                 error!("Error saving all history: {}", e);
@@ -246,8 +261,8 @@ async fn main() -> Result<()> {
 }
 
 fn ui(f: &mut Frame, app: &mut App) {
-    // Create the custom skin for markdown
-    let _md_skin = ChatBot::create_custom_skin();
+    // Remove or define create_custom_skin if needed
+    // let _md_skin = ChatBot::create_custom_skin();
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
