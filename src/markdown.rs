@@ -15,13 +15,21 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
         match event {
             Event::Start(tag) => {
                 match tag {
-                    Tag::Heading(_) => {
+                    Tag::Heading(level) => {
                         if !current_spans.is_empty() {
                             lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                         }
-                        current_style = Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD);
+                        current_style = match level {
+                            1 => Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                            2 => Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                            _ => Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        };
                     }
                     Tag::CodeBlock(_) => {
                         if !current_spans.is_empty() {
