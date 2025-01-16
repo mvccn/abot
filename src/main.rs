@@ -147,6 +147,7 @@ async fn main() -> Result<()> {
                                     match command[0] {
                                         "save" => {
                                             if let Err(e) = app.chatbot.save_last_interaction() {
+                                                error!("Error saving last interaction: {}", e);
                                                 app.messages.push(format!(
                                                     "Error saving last interaction: {}",
                                                     e
@@ -155,6 +156,7 @@ async fn main() -> Result<()> {
                                         }
                                         "saveall" => {
                                             if let Err(e) = app.chatbot.save_all_history() {
+                                                error!("Error saving all history: {}", e);
                                                 app.messages.push(format!(
                                                     "Error saving all history: {}",
                                                     e
@@ -165,6 +167,7 @@ async fn main() -> Result<()> {
                                             if command.len() > 1 {
                                                 let provider = command[1];
                                                 if let Err(e) = app.chatbot.set_provider(provider) {
+                                                    error!("Error setting provider: {}", e);
                                                     app.messages.push(format!(
                                                         "Error setting provider: {}",
                                                         e
