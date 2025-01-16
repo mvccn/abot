@@ -59,7 +59,13 @@ impl Log for UiLogger {
     }
 
     fn log(&self, record: &Record) {
-        let message = format!("[{}] {}", record.level(), record.args());
+        let message = format!(
+            "[{}] {}:{} - {}",
+            record.level(),
+            record.file().unwrap_or("unknown"),
+            record.line().unwrap_or(0),
+            record.args()
+        );
         if let Ok(mut buffer) = self.buffer.lock() {
             let len = buffer.len();
             buffer.push(message);
@@ -357,7 +363,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),     // Messages area
-            Constraint::Length(6),   // Log area
+            Constraint::Length(5),   // Log area (5 lines tall)
             Constraint::Length(3),   // Input area
             Constraint::Length(1),   // Status bar
         ])
