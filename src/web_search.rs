@@ -18,6 +18,7 @@ pub struct CachedDocument {
     summary: String,
 }
 
+#[derive(Debug)]
 pub struct WebSearch {
     client: Client,
     cache_dir: PathBuf,

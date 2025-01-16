@@ -92,7 +92,6 @@ impl Conversation {
 }
 
 #[derive(Debug)]
-#[derive(Debug)]
 pub struct ChatBot {
     pub conversation: Conversation,
     config: Config,

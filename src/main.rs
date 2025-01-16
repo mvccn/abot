@@ -171,7 +171,7 @@ async fn main() -> Result<()> {
 
     // Main loop
     loop {
-        let app = unsafe { APP.as_mut().unwrap() };
+        let mut app = unsafe { APP.as_mut().unwrap() };
         // Check for new log messages and auto-scroll if needed
         let current_log_count = log_buffer.lock().unwrap().len();
         if current_log_count > app.last_log_count {
