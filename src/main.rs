@@ -1,11 +1,11 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyEvent},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use log::{LevelFilter, Log, Metadata, Record, debug,warn,info, error};
+use log::{LevelFilter, Log, Metadata, Record, info, error};
 use std::any::Any;
 use ratatui::{
     prelude::*,
@@ -122,6 +122,22 @@ impl App {
             last_log_count: 0,
             last_message_count: 0,
         })
+    }
+
+    fn handle_input(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::PageUp => {
+                if !self.is_log_focused {
+                    self.scroll = self.scroll.saturating_sub(10);
+                }
+            }
+            KeyCode::PageDown => {
+                if !self.is_log_focused {
+                    self.scroll = self.scroll.saturating_add(10);
+                }
+            }
+            _ => {}  // Add catch-all pattern for other keys
+        }
     }
 }
 
@@ -293,19 +309,15 @@ async fn main() -> Result<()> {
                             }
                         }
                         KeyCode::PageUp => {
-                            let scroll_amount = (app.visible_height as usize / 2).max(1);
-                            if app.is_log_focused {
-                                app.log_scroll = app.log_scroll.saturating_sub(scroll_amount);
-                            } else {
-                                app.scroll = app.scroll.saturating_sub(scroll_amount);
+                            if !app.is_log_focused {
+                                // Scroll up by a larger amount (e.g., 10 lines)
+                                app.scroll = app.scroll.saturating_sub(10);
                             }
                         }
                         KeyCode::PageDown => {
-                            let scroll_amount = (app.visible_height as usize / 2).max(1);
-                            if app.is_log_focused {
-                                app.log_scroll = app.log_scroll.saturating_add(scroll_amount);
-                            } else {
-                                app.scroll = app.scroll.saturating_add(scroll_amount);
+                            if !app.is_log_focused {
+                                // Scroll down by a larger amount
+                                app.scroll = app.scroll.saturating_add(10);
                             }
                         }
                         KeyCode::Tab => {
