@@ -78,6 +78,8 @@ struct App {
     info_message: String,
     log_buffer: Arc<Mutex<Vec<String>>>,
     visible_height: u16,
+    log_scroll: usize,
+    is_log_focused: bool,
 }
 
 impl App {
@@ -104,6 +106,8 @@ impl App {
             info_message: String::new(),
             log_buffer,
             visible_height: 0,
+            log_scroll: 0,
+            is_log_focused: false,
         })
     }
 
@@ -265,18 +269,41 @@ async fn main() -> Result<()> {
                             app.input.pop();
                         }
                         KeyCode::Up => {
-                            app.scroll = app.scroll.saturating_sub(1);
+                            if app.is_log_focused {
+                                app.log_scroll = app.log_scroll.saturating_sub(1);
+                            } else {
+                                app.scroll = app.scroll.saturating_sub(1);
+                            }
                         }
                         KeyCode::Down => {
-                            app.scroll = app.scroll.saturating_add(1); // Will be clamped in ui()
+                            if app.is_log_focused {
+                                app.log_scroll = app.log_scroll.saturating_add(1);
+                            } else {
+                                app.scroll = app.scroll.saturating_add(1);
+                            }
                         }
                         KeyCode::PageUp => {
                             let scroll_amount = (app.visible_height as usize / 2).max(1);
-                            app.scroll = app.scroll.saturating_sub(scroll_amount);
+                            if app.is_log_focused {
+                                app.log_scroll = app.log_scroll.saturating_sub(scroll_amount);
+                            } else {
+                                app.scroll = app.scroll.saturating_sub(scroll_amount);
+                            }
                         }
                         KeyCode::PageDown => {
                             let scroll_amount = (app.visible_height as usize / 2).max(1);
-                            app.scroll = app.scroll.saturating_add(scroll_amount); // Will be clamped in ui()
+                            if app.is_log_focused {
+                                app.log_scroll = app.log_scroll.saturating_add(scroll_amount);
+                            } else {
+                                app.scroll = app.scroll.saturating_add(scroll_amount);
+                            }
+                        }
+                        KeyCode::Tab => {
+                            app.is_log_focused = !app.is_log_focused;
+                            if app.is_log_focused {
+                                // Auto-scroll to bottom when focusing logs
+                                app.log_scroll = usize::MAX;
+                            }
                         }
                         _ => {}
                     }
@@ -358,21 +385,32 @@ fn ui(f: &mut Frame, app: &mut App) {
             .position(app.scroll),
     );
 
-    // Log area with dimmed text
+    // Log area with scrollbar
     let log_content = if let Ok(buffer) = app.log_buffer.lock() {
-        // Calculate how many lines we can fit in the log area
-        let max_lines = chunks[1].height.saturating_sub(2) as usize; // Subtract 2 for borders
-        // Take last N messages that fit
-        buffer.iter()
-            .rev()
-            .take(max_lines)
-            .rev()
-            .map(|msg| msg.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+        buffer.join("\n")
     } else {
         String::from("Unable to access log buffer")
     };
+
+    // Calculate log scroll metrics
+    let log_lines: Vec<&str> = log_content.lines().collect();
+    let log_height = chunks[1].height.saturating_sub(2) as usize;
+    let max_log_scroll = if log_lines.len() > log_height {
+        log_lines.len() - log_height
+    } else {
+        0
+    };
+    
+    // Clamp log scroll value
+    app.log_scroll = app.log_scroll.min(max_log_scroll);
+    
+    // Get visible log lines
+    let visible_logs = log_lines
+        .iter()
+        .skip(app.log_scroll)
+        .take(log_height)
+        .map(|line| Line::from(*line))
+        .collect::<Vec<_>>();
 
     let collapsed_set = symbols::border::Set {
         top_left: symbols::line::NORMAL.vertical_right,
@@ -385,13 +423,44 @@ fn ui(f: &mut Frame, app: &mut App) {
         ..symbols::border::ROUNDED
     };
     // Log area with modified borders
-    let logs = Paragraph::new(log_content)
+    // Split log area into content and scrollbar
+    let (log_area, log_scrollbar_area) = {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(chunks[1]);
+        (chunks[0], chunks[1])
+    };
+
+    let logs = Paragraph::new(visible_logs)
         .block(Block::default()
             .title("Logs")
             .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
-            .border_set(collapsed_set))  // Apply custom border set
-        .wrap(Wrap { trim: true });
-    f.render_widget(logs, chunks[1]);
+            .border_set(collapsed_set)
+            .style(if app.is_log_focused {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            }))
+        .wrap(Wrap { trim: true })
+        .scroll((0, 0));
+    f.render_widget(logs, log_area);
+
+    // Render log scrollbar
+    let log_scrollbar = Scrollbar::default()
+        .orientation(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some("↑"))
+        .end_symbol(Some("↓"));
+
+    f.render_stateful_widget(
+        log_scrollbar,
+        log_scrollbar_area,
+        &mut ScrollbarState::new(log_lines.len())
+            .position(app.log_scroll),
+    );
 
     // Input area with modified borders
     let input = Paragraph::new(app.input.as_str())
