@@ -164,11 +164,9 @@ async fn main() -> Result<()> {
     let config = Config::load()?;
     let mut app = App::new(config, log_buffer.clone()).await?;
 
-    // Create a mutable reference for the main loop
-    let mut app = app;
-
     // Main loop
     loop {
+        let app = APP.get_mut().unwrap();
         // Check for new log messages and auto-scroll if needed
         let current_log_count = log_buffer.lock().unwrap().len();
         if current_log_count > app.last_log_count {
@@ -322,7 +320,7 @@ async fn main() -> Result<()> {
                             }
                         }
                         KeyCode::Tab => {
-                            app.is_log_focused = !app.is_log_focused;
+                            APP.get_mut().unwrap().is_log_focused = !APP.get_mut().unwrap().is_log_focused;
                             if app.is_log_focused {
                                 // Auto-scroll to bottom when focusing logs
                                 app.log_scroll = usize::MAX;
