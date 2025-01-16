@@ -1,43 +1,29 @@
 use anyhow::Result;
 use crossterm::{
-    cursor, execute,
-    terminal::{Clear, ClearType},
-};
-use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
+    execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures::stream;
-use futures::{Stream, StreamExt};
-use log::{debug, error, info, trace, warn, Log, Metadata, Record, LevelFilter};
-use ratatui::style::Color as RatatuiColor;
-use ratatui::widgets::BorderType;
+use futures::StreamExt;
+use log::{info, LevelFilter, Log, Metadata, Record};
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph, Wrap},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+        BorderType,
+    },
     Terminal,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::fs;
-use std::io::{stdout, Write};
-use std::pin::Pin;
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use uuid::Uuid;
-use std::sync::Mutex;
-use std::sync::Arc;
-use termimad::MadSkin;
-use ratatui::symbols;
-use ratatui::widgets::Scrollbar;
-use ratatui::widgets::ScrollbarOrientation;
-use ratatui::widgets::ScrollbarState;
-mod llama;
-mod web_search;
-use web_search::WebSearch;
-mod markdown;
+use std::io::stdout;
+use std::sync::{Arc, Mutex};
+
 mod chatbot;
 use chatbot::{ChatBot, Config};
+mod llama;
+mod web_search;
+mod markdown;
 
 // Add this struct for logging
 struct UiLogger {
@@ -45,7 +31,7 @@ struct UiLogger {
 }
 
 impl Log for UiLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
+    fn enabled(&self, _metadata: &Metadata) -> bool {
         true
     }
 
@@ -120,8 +106,6 @@ impl App {
         self.info_message = message;
     }
 }
-
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -271,7 +255,7 @@ async fn main() -> Result<()> {
 
 fn ui(f: &mut Frame, app: &mut App) {
     // Create the custom skin for markdown
-    let md_skin = ChatBot::create_custom_skin();
+    let _md_skin = ChatBot::create_custom_skin();
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -283,8 +267,8 @@ fn ui(f: &mut Frame, app: &mut App) {
         ])
         .split(f.size());
 
-    // Calculate scroll position to keep the latest messages visible
-    let messages_text = app.messages.iter()
+    // Calculate messages text using cached renderings
+    let messages_text: Vec<Line> = app.messages.iter()
         .flat_map(|msg| {
             if msg.starts_with("Assistant:") {
                 let content = msg.trim_start_matches("Assistant:").trim();
@@ -302,7 +286,7 @@ fn ui(f: &mut Frame, app: &mut App) {
                 vec![Line::from(msg.clone())]
             }
         })
-        .collect::<Vec<_>>();
+        .collect();
 
     // Calculate scroll and content metrics
     let total_message_height = messages_text.len();

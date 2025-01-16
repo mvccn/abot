@@ -7,7 +7,7 @@ use reqwest::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use crate::{Config, ModelConfig};
+use crate::chatbot::{Config, ModelConfig};
 use log::{debug, info, warn, error};
 
 #[derive(Debug, Error)]

@@ -1,44 +1,47 @@
- use anyhow::Result;
+use anyhow::Result;
 use futures::stream;
 use futures::{Stream, StreamExt};
 use log::{debug, info};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
+use std::pin::Pin;
 use uuid::Uuid;
 use crate::llama;
 use crate::web_search::WebSearch;
+use bytes::Bytes;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct WebSearchConfig {
+pub struct WebSearchConfig {
     result_limit: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct Config {
-    default: DefaultConfig,
-    default_provider: String,
-    deepseek: ModelConfig,
-    openai: ModelConfig,
-    llamacpp: ModelConfig,
-    ollama: ModelConfig,
-    web_search: WebSearchConfig,
+pub struct Config {
+    pub default: DefaultConfig,
+    pub default_provider: String,
+    pub deepseek: ModelConfig,
+    pub openai: ModelConfig,
+    pub llamacpp: ModelConfig,
+    pub ollama: ModelConfig,
+    pub web_search: WebSearchConfig,
 }
 
 pub struct ChatBot {
     history: Vec<llama::Message>,
     config: Config,
-    current_provider: String,
+    pub current_provider: String,
     llama_client: llama::LlamaClient,
     web_search: WebSearch,
     conversation_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct DefaultConfig {
-    temperature: f32,
-    max_tokens: u32,
-    stream: bool,
-    initial_prompt: String,
+pub struct DefaultConfig {
+    pub temperature: f32,
+    pub max_tokens: u32,
+    pub stream: bool,
+    pub initial_prompt: String,
 }
 
 impl Default for Config {
@@ -90,12 +93,12 @@ impl Default for Config {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelConfig {
-    api_url: String,
-    api_key: Option<String>,
-    model: String,
-    temperature: Option<f32>,
-    max_tokens: Option<u32>,
-    stream: Option<bool>,
+    pub api_url: String,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<u32>,
+    pub stream: Option<bool>,
 }
 
 impl ModelConfig {
@@ -236,7 +239,7 @@ impl ChatBot {
             .collect::<Vec<_>>()
             .join(" ");
 
-        let message = if is_web_search {
+        let _message = if is_web_search {
             println!("Performing a web search for: '{}'", query);
             let web_results = self.web_search.search(&query).await?;
             format!(
@@ -263,7 +266,7 @@ impl ChatBot {
 
         if self.config.default.stream {
             let stream = response.bytes_stream().map(|chunk_result| {
-                chunk_result.map_err(anyhow::Error::from).and_then(|chunk| {
+                chunk_result.map_err(anyhow::Error::from).and_then(|chunk: Bytes| {
                     let chunk_str = String::from_utf8_lossy(&chunk);
                     let mut content = String::new();
 
@@ -275,7 +278,6 @@ impl ChatBot {
                             }
 
                             if let Ok(json) = serde_json::from_str::<Value>(data) {
-                                debug!("json: {}", json);
                                 if let Some(delta_content) =
                                     json["choices"][0]["delta"]["content"].as_str()
                                 {
