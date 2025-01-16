@@ -185,25 +185,25 @@ impl LlamaClient {
             }
         }
 
-        println!("Switched to {} provider", provider);
-        println!("Using model: {}", model_config.model);
-        println!("API URL: {}", model_config.api_url);
+        info!("Switched to {} provider", provider);
+        info!("Using model: {}", model_config.model);
+        info!("API URL: {}", model_config.api_url);
         
-        // Print any custom settings that override defaults
+        // Log any custom settings that override defaults
         let defaults = &config.default;
         if let Some(temp) = model_config.temperature {
             if temp != defaults.temperature {
-                println!("Temperature: {} (custom)", temp);
+                info!("Temperature: {} (custom)", temp);
             }
         }
         if let Some(tokens) = model_config.max_tokens {
             if tokens != defaults.max_tokens {
-                println!("Max tokens: {} (custom)", tokens);
+                info!("Max tokens: {} (custom)", tokens);
             }
         }
         if let Some(stream) = model_config.stream {
             if stream != defaults.stream {
-                println!("Stream: {} (custom)", stream);
+                info!("Stream: {} (custom)", stream);
             }
         }
 
