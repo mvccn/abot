@@ -38,6 +38,8 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         if !current_spans.is_empty() {
                             lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                         }
+                        // Add empty line before code block
+                        lines.push(Line::from(Vec::new()));
                         code_block = true;
                         current_style = Style::default()
                             .fg(Color::Gray)
@@ -53,6 +55,8 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         if !current_spans.is_empty() {
                             lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                         }
+                        // Add empty line before blockquote
+                        lines.push(Line::from(Vec::new()));
                         current_style = Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::ITALIC);
@@ -62,6 +66,8 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         if !current_spans.is_empty() {
                             lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                         }
+                        // Add empty line before list
+                        lines.push(Line::from(Vec::new()));
                     }
                     Tag::Item => {
                         current_spans.push(Span::styled("• ".to_string(), current_style));
@@ -80,6 +86,8 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         if !current_spans.is_empty() {
                             lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                         }
+                        // Add empty line after code block
+                        lines.push(Line::from(Vec::new()));
                         code_block = false;
                     }
                     Tag::Heading(_) | Tag::BlockQuote | Tag::Paragraph => {
