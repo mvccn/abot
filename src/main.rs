@@ -363,7 +363,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),     // Messages area
-            Constraint::Length(5),   // Log area (5 lines tall)
+            Constraint::Ratio(3, 10),   // Log area (30% of screen height)
             Constraint::Length(3),   // Input area
             Constraint::Length(1),   // Status bar
         ])
