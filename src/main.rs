@@ -20,7 +20,9 @@ use std::io::stdout;
 use std::sync::{Arc, Mutex};
 
 mod chatbot;
-use chatbot::{ChatBot, Config};
+mod config;
+use chatbot::ChatBot;
+use config::Config;
 mod llama;
 mod web_search;
 mod markdown;
