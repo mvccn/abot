@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
     };
     
     // Only initialize logger if not already initialized
-    if log::logger().as_ref().type_id() != std::any::TypeId::of::<UiLogger>() {
+    if std::any::TypeId::of::<UiLogger>() != std::any::TypeId::of::<dyn Log>() {
         log::set_boxed_logger(Box::new(logger))
             .map(|()| log::set_max_level(LevelFilter::Info))?;
     }
