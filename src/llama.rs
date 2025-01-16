@@ -7,7 +7,7 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use crate::config::{Config, ModelConfig};
-use log::{debug, warn, error};
+use log::{debug, warn, error, info};
 
 #[derive(Debug, Error)]
 pub enum LlamaError {
@@ -81,6 +81,9 @@ impl LlamaClient {
     }
 
     pub async fn generate(&self, messages: &[Message]) -> Result<Response> {
+        info!("Generating response using model: {}", self.config.model);
+        debug!("API URL: {}", self.config.api_url);
+        
         let request = ChatRequest {
             model: self.config.model.clone(),
             messages: messages.to_vec(),
@@ -88,10 +91,8 @@ impl LlamaClient {
             temperature: self.config.temperature.unwrap_or(0.7),
             max_tokens: self.config.max_tokens,
         };
-        #[cfg(debug_assertions)]
-        {
-            debug!("Request: {:?}", request);
-        }
+        
+        debug!("Request payload: {:?}", request);
 
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -104,6 +105,7 @@ impl LlamaClient {
             );
         }
 
+        info!("Sending request to LLM API...");
         let response = self.client
             .post(&self.config.api_url)
             .headers(headers)
@@ -111,24 +113,37 @@ impl LlamaClient {
             .send()
             .await
             .context("Failed to connect to service")
-            .map_err(|e| LlamaError::ServiceUnavailable(e.to_string()))?;
+            .map_err(|e| {
+                error!("API connection failed: {}", e);
+                LlamaError::ServiceUnavailable(e.to_string())
+            })?;
 
-        #[cfg(debug_assertions)]
-        {
-            debug!("Response status: {}", response.status());
-            debug!("Response headers: {:#?}", response.headers());
+        debug!("Response status: {}", response.status());
+        debug!("Response headers: {:#?}", response.headers());
+        
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            error!("API request failed with status {}: {}", status, body);
+            return Err(LlamaError::RequestFailed(format!("Status: {}, Body: {}", status, body)).into());
         }
+        
+        info!("Received successful response from LLM API");
         
         Ok(response)
     }
 
     // Helper method to extract text from a response
     pub async fn get_response_text(response: Response) -> Result<String> {
+        debug!("Parsing LLM response...");
         let completion: CompletionResponse = response
             .json()
             .await
             .context("Failed to parse response")
-            .map_err(|e| LlamaError::ResponseParseError(e.to_string()))?;
+            .map_err(|e| {
+                error!("Failed to parse LLM response: {}", e);
+                LlamaError::ResponseParseError(e.to_string())
+            })?;
 
         // Handle different response formats
         if !completion.response.is_empty() {
@@ -149,13 +164,18 @@ impl LlamaClient {
     }
 
     pub fn set_provider(config: &Config, provider: &str) -> Result<Self> {
+        info!("Switching to provider: {}", provider);
+        
         // Get the model config for the provider
         let model_config = match provider {
             "deepseek" => config.deepseek.clone(),
             "openai" => config.openai.clone(),
             "llamacpp" => config.llamacpp.clone(),
             "ollama" => config.ollama.clone(),
-            _ => return Err(anyhow::anyhow!("Unsupported provider: {}", provider))
+            _ => {
+                error!("Unsupported provider: {}", provider);
+                return Err(anyhow::anyhow!("Unsupported provider: {}", provider))
+            }
         };
 
         // Check for API key if needed
