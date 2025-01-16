@@ -21,7 +21,11 @@ pub struct Message {
 }
 
 impl Message {
-    fn new(role: &str, content: &str) -> Self {
+    pub fn new(role: &str, content: &str) -> Self {
+        Self::with_rendered(role, content, role == "assistant")
+    }
+
+    pub fn with_rendered(role: &str, content: &str, should_render: bool) -> Self {
         let rendered = if role == "assistant" {
             markdown::markdown_to_lines(content)
         } else {

@@ -21,13 +21,16 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         }
                         current_style = match level {
                             1 => Style::default()
-                                .fg(Color::Yellow)
+                                .fg(Color::Red)
                                 .add_modifier(Modifier::BOLD),
                             2 => Style::default()
                                 .fg(Color::Yellow)
                                 .add_modifier(Modifier::BOLD),
+                            3 => Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
                             _ => Style::default()
-                                .fg(Color::Yellow)
+                                .fg(Color::Blue)
                                 .add_modifier(Modifier::BOLD),
                         };
                     }

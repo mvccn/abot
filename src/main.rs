@@ -206,7 +206,15 @@ async fn main() -> Result<()> {
                                                         if !content.is_empty() {
                                                             if is_first_chunk {
                                                                 app.messages.push("Assistant: ".to_string());
+                                                                app.messages.push("▌".to_string()); // Typing indicator
                                                                 is_first_chunk = false;
+                                                            } else {
+                                                                // Remove typing indicator if present
+                                                                if let Some(last) = app.messages.last_mut() {
+                                                                    if last == "▌" {
+                                                                        app.messages.pop();
+                                                                    }
+                                                                }
                                                             }
                                                             app.update_current_response(&content);
                                                             terminal.draw(|f| ui(f, &mut app))?;
