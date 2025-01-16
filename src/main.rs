@@ -83,18 +83,7 @@ struct App {
 }
 
 impl App {
-    async fn new(config: Config) -> Result<Self> {
-        // Initialize logger with buffer
-        let logger = UiLogger::new(100); // Keep last 100 log messages
-        let log_buffer = logger.buffer.clone();
-        
-        // Initialize the logger only once
-        INIT.call_once(|| {
-            log::set_boxed_logger(Box::new(logger))
-                .map(|()| log::set_max_level(LevelFilter::Debug))
-                .expect("Failed to set logger");
-        });
-
+    async fn new(config: Config, log_buffer: Arc<Mutex<Vec<String>>>) -> Result<Self> {
         let chatbot = ChatBot::new(config).await?;
         
         Ok(Self {
@@ -146,10 +135,20 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Initialize logger first
+    let logger = UiLogger::new(100); // Keep last 100 log messages
+    let log_buffer = logger.buffer.clone();
+    
+    // Initialize the logger only once
+    INIT.call_once(|| {
+        log::set_boxed_logger(Box::new(logger))
+            .map(|()| log::set_max_level(LevelFilter::Debug))
+            .expect("Failed to set logger");
+    });
+
     // Create app state
     let config = Config::load()?;
-    let mut app = App::new(config).await?;
-    let log_buffer = app.log_buffer.clone();
+    let mut app = App::new(config, log_buffer.clone()).await?;
 
     // Main loop
     loop {
