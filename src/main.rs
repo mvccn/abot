@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use log::{LevelFilter, Log, Metadata, Record, info};
+use log::{LevelFilter, Log, Metadata, Record, info, error};
 use ratatui::{
     prelude::*,
     style::{Color, Style},
@@ -27,13 +27,6 @@ mod llama;
 mod web_search;
 mod markdown;
 
-// Initialize logger with max level
-let logger = UiLogger {
-    buffer: log_buffer.clone(),
-};
-    
-log::set_boxed_logger(Box::new(logger))
-    .map(|()| log::set_max_level(LevelFilter::Info))?;
 struct UiLogger {
     buffer: Arc<Mutex<Vec<String>>>,
 }
@@ -109,11 +102,19 @@ impl App {
             self.current_response.clear(); // Clear the current response buffer
         }
     }
-
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logger
+    let log_buffer = Arc::new(Mutex::new(Vec::new()));
+    let logger = UiLogger {
+        buffer: log_buffer.clone(),
+    };
+    
+    log::set_boxed_logger(Box::new(logger))
+        .map(|()| log::set_max_level(LevelFilter::Info))?;
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -148,19 +149,13 @@ async fn main() -> Result<()> {
                                         "save" => {
                                             if let Err(e) = app.chatbot.save_last_interaction() {
                                                 error!("Error saving last interaction: {}", e);
-                                                app.messages.push(format!(
-                                                    "Error saving last interaction: {}",
-                                                    e
-                                                ));
+                     
                                             }
                                         }
                                         "saveall" => {
                                             if let Err(e) = app.chatbot.save_all_history() {
                                                 error!("Error saving all history: {}", e);
-                                                app.messages.push(format!(
-                                                    "Error saving all history: {}",
-                                                    e
-                                                ));
+                  
                                             }
                                         }
                                         "model" => {
@@ -168,21 +163,16 @@ async fn main() -> Result<()> {
                                                 let provider = command[1];
                                                 if let Err(e) = app.chatbot.set_provider(provider) {
                                                     error!("Error setting provider: {}", e);
-                                                    app.messages.push(format!(
-                                                        "Error setting provider: {}",
-                                                        e
-                                                    ));
+                               
                                                 } else {
                                                    info!("Switched to provider: {}", provider);
                                                 }
                                             } else {
-                                                app.messages
-                                                    .push("Usage: /model <provider>".to_string());
+                                                error!("Usage: /model <provider>");
                                             }
                                         }
                                         _ => {
-                                            app.messages
-                                                .push(format!("Unknown command: {}", input));
+                                            error!("Unknown command: {}", input);
                                         }
                                     }
                                 } else {
