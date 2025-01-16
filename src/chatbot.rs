@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::stream;
 use futures::{Stream, StreamExt};
-use log::{debug, error, info};
+use log::{debug, error};
 use anyhow::Context;
 use serde_json::Value;
 use std::fs;
