@@ -101,13 +101,32 @@ impl LlamaClient {
                     "num_predict": self.config.max_tokens
                 }
             })
-        } else {
+        } else if self.config.api_url.contains("llamacpp") {
             // Llama.cpp format
             serde_json::json!({
-                "prompt": prompt,
+                "messages": messages.iter().map(|msg| {
+                    serde_json::json!({
+                        "role": msg.role,
+                        "content": msg.content
+                    })
+                }).collect::<Vec<_>>(),
                 "stream": self.config.stream.unwrap_or(true),
                 "temperature": self.config.temperature.unwrap_or(0.7),
                 "n_predict": self.config.max_tokens
+            })
+        } else {
+            // OpenAI/Deepseek format
+            serde_json::json!({
+                "model": self.config.model,
+                "messages": messages.iter().map(|msg| {
+                    serde_json::json!({
+                        "role": msg.role,
+                        "content": msg.content
+                    })
+                }).collect::<Vec<_>>(),
+                "stream": self.config.stream.unwrap_or(true),
+                "temperature": self.config.temperature.unwrap_or(0.7),
+                "max_tokens": self.config.max_tokens
             })
         };
         
