@@ -29,6 +29,16 @@ mod markdown;
 
 struct UiLogger {
     buffer: Arc<Mutex<Vec<String>>>,
+    max_lines: usize,
+}
+
+impl UiLogger {
+    fn new(max_lines: usize) -> Self {
+        Self {
+            buffer: Arc::new(Mutex::new(Vec::new())),
+            max_lines,
+        }
+    }
 }
 
 impl Log for UiLogger {
@@ -40,6 +50,10 @@ impl Log for UiLogger {
         let message = format!("[{}] {}", record.level(), record.args());
         if let Ok(mut buffer) = self.buffer.lock() {
             buffer.push(message);
+            // Keep only the last max_lines messages
+            if buffer.len() > self.max_lines {
+                buffer.drain(0..buffer.len() - self.max_lines);
+            }
         }
     }
 
@@ -101,13 +115,11 @@ impl App {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logger with buffer
-    let log_buffer = Arc::new(Mutex::new(Vec::new()));
-    let logger = UiLogger {
-        buffer: log_buffer.clone(),
-    };
+    let logger = UiLogger::new(100); // Keep last 100 log messages
+    let log_buffer = logger.buffer.clone();
     
     // Only initialize logger if not already initialized
-    if std::any::TypeId::of::<UiLogger>() != std::any::TypeId::of::<dyn Log>() {
+    if log::logger().as_any().type_id() != std::any::TypeId::of::<UiLogger>() {
         log::set_boxed_logger(Box::new(logger))
             .map(|()| log::set_max_level(LevelFilter::Debug))?;
     }
@@ -337,8 +349,11 @@ fn ui(f: &mut Frame, app: &mut App) {
     // Log area with dimmed text
     let log_content = if let Ok(buffer) = app.log_buffer.lock() {
         // Take last 5 log messages
-        buffer.iter().rev().take(5).rev()
-            .cloned()
+        buffer.iter()
+            .rev()
+            .take(5)
+            .rev()
+            .map(|msg| msg.to_string())
             .collect::<Vec<_>>()
             .join("\n")
     } else {
