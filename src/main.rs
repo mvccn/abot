@@ -82,7 +82,17 @@ struct App {
 
 impl App {
     async fn new(config: Config) -> Result<Self> {
-        let log_buffer = Arc::new(Mutex::new(Vec::new()));
+        // Initialize logger with buffer
+        let logger = UiLogger::new(100); // Keep last 100 log messages
+        let log_buffer = logger.buffer.clone();
+        
+        // Initialize the logger only once
+        INIT.call_once(|| {
+            log::set_boxed_logger(Box::new(logger))
+                .map(|()| log::set_max_level(LevelFilter::Debug))
+                .expect("Failed to set logger");
+        });
+
         let chatbot = ChatBot::new(config).await?;
         
         Ok(Self {
@@ -124,16 +134,6 @@ static INIT: Once = Once::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logger with buffer
-    let logger = UiLogger::new(100); // Keep last 100 log messages
-    let log_buffer = logger.buffer.clone();
-    
-    // Use a static flag to ensure logger is only initialized once
-    INIT.call_once(|| {
-        log::set_boxed_logger(Box::new(logger))
-            .map(|()| log::set_max_level(LevelFilter::Debug))
-            .expect("Failed to set logger");
-    });
 
     // Setup terminal
     enable_raw_mode()?;
@@ -145,6 +145,7 @@ async fn main() -> Result<()> {
     // Create app state
     let config = Config::load()?;
     let mut app = App::new(config).await?;
+    let log_buffer = app.log_buffer.clone();
 
     // Main loop
     loop {
