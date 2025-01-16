@@ -77,10 +77,14 @@ impl App {
 
     fn update_current_response(&mut self, content: &str) {
         self.current_response.push_str(content);
+        
         // Update the last message if it's from the assistant
-        if let Some(last) = self.messages.last_mut() {
-            if last.starts_with("Assistant:") {
-                *last = format!("Assistant: {}", self.current_response);
+        if let Some(last_msg) = self.chatbot.conversation.last_message_mut() {
+            if last_msg.role == "assistant" {
+                // Update both raw and rendered content
+                last_msg.raw_content = self.current_response.clone();
+                last_msg.rendered_content = markdown::markdown_to_lines(&self.current_response, &self.chatbot.conversation.skin);
+                
                 // Auto-scroll to bottom when updating response
                 self.scroll = usize::MAX; // This will be clamped to max_scroll in ui()
             }
@@ -255,26 +259,8 @@ fn ui(f: &mut Frame, app: &mut App) {
         ])
         .split(f.size());
 
-    // Calculate messages text using cached renderings
-    let messages_text: Vec<Line> = app.messages.iter()
-        .flat_map(|msg| {
-            if msg.starts_with("Assistant:") {
-                let content = msg.trim_start_matches("Assistant:").trim();
-                let mut lines = vec![Line::from(vec![
-                    Span::styled("Assistant: ".to_string(), Style::default().fg(Color::Green))
-                ])];
-                lines.extend(markdown::markdown_to_lines(content));
-                lines
-            } else if msg.starts_with("You:") {
-                vec![Line::from(vec![
-                    Span::styled("You: ".to_string(), Style::default().fg(Color::Blue)),
-                    Span::raw(msg.trim_start_matches("You:").trim().to_string()),
-                ])]
-            } else {
-                vec![Line::from(msg.clone())]
-            }
-        })
-        .collect();
+    // Get pre-rendered messages from conversation
+    let messages_text = app.chatbot.conversation.get_rendered_messages();
 
     // Calculate scroll and content metrics
     let total_message_height = messages_text.len();

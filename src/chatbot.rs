@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::stream;
 use futures::{Stream, StreamExt};
-use log::{debug, error,info};
+use log::{debug, error, info};
 use serde_json::Value;
 use std::fs;
 use std::pin::Pin;
@@ -10,9 +10,85 @@ use crate::llama;
 use crate::web_search::WebSearch;
 use bytes::Bytes;
 use crate::config::{Config, ModelConfig};
+use termimad::MadSkin;
+
+#[derive(Debug)]
+struct Message {
+    role: String,
+    raw_content: String,
+    rendered_content: Vec<Line<'static>>,
+}
+
+impl Message {
+    fn new(role: &str, content: &str, skin: &MadSkin) -> Self {
+        let rendered = if role == "assistant" {
+            markdown::markdown_to_lines(content, skin)
+        } else {
+            vec![Line::from(content.to_string())]
+        };
+        
+        Self {
+            role: role.to_string(),
+            raw_content: content.to_string(),
+            rendered_content: rendered,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Conversation {
+    messages: Vec<Message>,
+    skin: MadSkin,
+}
+
+impl Conversation {
+    fn new(skin: MadSkin) -> Self {
+        Self {
+            messages: Vec::new(),
+            skin,
+        }
+    }
+
+    fn add_message(&mut self, role: &str, content: &str) {
+        let message = Message::new(role, content, &self.skin);
+        self.messages.push(message);
+    }
+
+    fn get_rendered_messages(&self) -> Vec<Line<'static>> {
+        self.messages.iter()
+            .flat_map(|msg| {
+                let mut lines = vec![Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", msg.role),
+                        match msg.role.as_str() {
+                            "assistant" => Style::default().fg(Color::Green),
+                            "user" => Style::default().fg(Color::Blue),
+                            _ => Style::default(),
+                        }
+                    )
+                ])];
+                lines.extend(msg.rendered_content.clone());
+                lines
+            })
+            .collect()
+    }
+
+    fn get_raw_messages(&self) -> Vec<llama::Message> {
+        self.messages.iter()
+            .map(|msg| llama::Message {
+                role: msg.role.clone(),
+                content: msg.raw_content.clone(),
+            })
+            .collect()
+    }
+
+    fn last_message_mut(&mut self) -> Option<&mut Message> {
+        self.messages.last_mut()
+    }
+}
 
 pub struct ChatBot {
-    history: Vec<llama::Message>,
+    conversation: Conversation,
     config: Config,
     pub current_provider: String,
     llama_client: llama::LlamaClient,
@@ -46,8 +122,9 @@ impl ChatBot {
 
         let llama_client = llama::LlamaClient::new(config.deepseek.clone())?;
 
+        let skin = Self::create_custom_skin();
         let mut bot = Self {
-            history: Vec::new(),
+            conversation: Conversation::new(skin),
             current_provider: config.default_provider.clone(),
             llama_client,
             config: config.clone(),
@@ -56,16 +133,13 @@ impl ChatBot {
         };
 
         let initial_prompt = bot.config.default.initial_prompt.clone();
-        bot.add_message("system", &initial_prompt);
+        bot.conversation.add_message("system", &initial_prompt);
 
         Ok(bot)
     }
 
     pub fn add_message(&mut self, role: &str, content: &str) {
-        self.history.push(llama::Message {
-            role: role.to_string(),
-            content: content.to_string(),
-        });
+        self.conversation.add_message(role, content);
     }
 
     pub fn create_custom_skin() -> termimad::MadSkin {
@@ -108,7 +182,7 @@ impl ChatBot {
             debug!("Sending request to: {}", self.llama_client.config.api_url);
         }
 
-        let response = match self.llama_client.generate(&self.history).await {
+        let response = match self.llama_client.generate(&self.conversation.get_raw_messages()).await {
             Ok(resp) => resp,
             Err(e) => {
                 error!("Error generating response: {}", e);
