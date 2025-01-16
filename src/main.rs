@@ -70,7 +70,8 @@ impl Log for UiLogger {
             // Notify about new log message
             unsafe {
                 if let Some(app) = APP.as_mut() {
-                app.log_scroll = usize::MAX; // Auto-scroll to bottom
+                    app.log_scroll = usize::MAX; // Auto-scroll to bottom
+                }
             }
         }
     }
