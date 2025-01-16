@@ -360,10 +360,12 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     // Log area with dimmed text
     let log_content = if let Ok(buffer) = app.log_buffer.lock() {
-        // Take last 5 log messages
+        // Calculate how many lines we can fit in the log area
+        let max_lines = chunks[1].height.saturating_sub(2) as usize; // Subtract 2 for borders
+        // Take last N messages that fit
         buffer.iter()
             .rev()
-            .take(5)
+            .take(max_lines)
             .rev()
             .map(|msg| msg.to_string())
             .collect::<Vec<_>>()
