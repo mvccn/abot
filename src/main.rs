@@ -69,7 +69,7 @@ impl Log for UiLogger {
             }
             // Notify about new log message
             if let Some(app) = APP.get_mut() {
-                *app.log_scroll = usize::MAX; // Auto-scroll to bottom
+                app.log_scroll = usize::MAX; // Auto-scroll to bottom
             }
         }
     }
@@ -164,8 +164,8 @@ async fn main() -> Result<()> {
     let config = Config::load()?;
     let mut app = App::new(config, log_buffer.clone()).await?;
 
-    // Store app reference for logger
-    APP.set(Box::leak(Box::new(app))).unwrap();
+    // Create a mutable reference for the main loop
+    let mut app = app;
 
     // Main loop
     loop {

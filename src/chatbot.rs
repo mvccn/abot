@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::stream;
 use futures::{Stream, StreamExt};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use anyhow::Context;
 use serde_json::Value;
 use std::fs;
@@ -91,6 +91,7 @@ impl Conversation {
     }
 }
 
+#[derive(Debug)]
 pub struct ChatBot {
     pub conversation: Conversation,
     config: Config,
