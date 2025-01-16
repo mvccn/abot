@@ -28,6 +28,7 @@ mod llama;
 mod web_search;
 mod markdown;
 
+#[derive(Clone)]
 struct UiLogger {
     buffer: Arc<Mutex<Vec<String>>>,
     max_lines: usize,
@@ -67,8 +68,8 @@ impl Log for UiLogger {
                 buffer.drain(0..len - self.max_lines);
             }
             // Notify about new log message
-            if let Some(app) = APP.get() {
-                app.log_scroll = usize::MAX; // Auto-scroll to bottom
+            if let Some(app) = APP.get_mut() {
+                *app.log_scroll = usize::MAX; // Auto-scroll to bottom
             }
         }
     }
@@ -79,6 +80,7 @@ impl Log for UiLogger {
 // Modify App struct to include log buffer
 static APP: std::sync::OnceLock<&'static mut App> = std::sync::OnceLock::new();
 
+#[derive(Debug)]
 struct App {
     chatbot: ChatBot,
     input: String,
@@ -97,7 +99,7 @@ impl App {
     async fn new(config: Config, log_buffer: Arc<Mutex<Vec<String>>>) -> Result<Self> {
         let chatbot = ChatBot::new(config).await?;
         
-        let app = Self {
+        Ok(Self {
             chatbot,
             input: String::new(),
             messages: Vec::new(),
@@ -109,12 +111,7 @@ impl App {
             log_scroll: 0,
             is_log_focused: false,
             last_log_count: 0,
-        };
-        
-        // Store app reference for logger
-        APP.set(Box::leak(Box::new(app))).unwrap();
-        
-        Ok(APP.get().unwrap().clone())
+        })
     }
 
     fn update_current_response(&mut self, content: &str) {
@@ -158,7 +155,7 @@ async fn main() -> Result<()> {
     
     // Initialize the logger only once
     INIT.call_once(|| {
-        log::set_boxed_logger(Box::new(logger))
+        log::set_boxed_logger(Box::new(logger.clone()))
             .map(|()| log::set_max_level(LevelFilter::Debug))
             .expect("Failed to set logger");
     });
@@ -167,10 +164,13 @@ async fn main() -> Result<()> {
     let config = Config::load()?;
     let mut app = App::new(config, log_buffer.clone()).await?;
 
+    // Store app reference for logger
+    APP.set(Box::leak(Box::new(app))).unwrap();
+
     // Main loop
     loop {
         // Check for new log messages and auto-scroll if needed
-        let current_log_count = logger.get_line_count();
+        let current_log_count = log_buffer.lock().unwrap().len();
         if current_log_count > app.last_log_count {
             app.log_scroll = usize::MAX; // Auto-scroll to bottom
             app.last_log_count = current_log_count;
