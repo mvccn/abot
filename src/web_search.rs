@@ -44,17 +44,18 @@ impl WebSearch {
         }
 
         // Test LLama availability
-        let use_llama = match llama.test_availability().await {
-            Ok(true) => true,
-            Ok(false) => {
-                warn!("LLama service is not available, falling back to simple summaries");
-                false
-            },
-            Err(e) => {
-                warn!("Error testing LLama availability: {}, falling back to simple summaries", e);
-                false
-            }
-        };
+        let use_llama = true;
+        // let use_llama = match llama.test_availability().await {
+        //     Ok(true) => true,
+        //     Ok(false) => {
+        //         warn!("LLama service is not available, falling back to simple summaries");
+        //         false
+        //     },
+        //     Err(e) => {
+        //         warn!("Error testing LLama availability: {}, falling back to simple summaries", e);
+        //         false
+        //     }
+        // };
 
         Ok(Self {
             client: Client::new(),

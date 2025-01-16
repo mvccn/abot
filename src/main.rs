@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use log::{LevelFilter, Log, Metadata, Record, info, error};
+use log::{LevelFilter, Log, Metadata, Record, debug,warn,info, error};
 use std::any::Any;
 use ratatui::{
     prelude::*,
@@ -92,7 +92,7 @@ static mut APP: Option<App> = None;
 struct App {
     chatbot: ChatBot,
     input: String,
-    messages: Vec<String>,
+    // messages: Vec<String>,
     scroll: usize,          // This will now represent the line number we're scrolled to
     current_response: String,
     info_message: String,
@@ -110,7 +110,7 @@ impl App {
         Ok(Self {
             chatbot,
             input: String::new(),
-            messages: Vec::new(),
+            // messages: Vec::new(),
             scroll: 0,
             current_response: String::new(),
             info_message: String::new(),
@@ -120,40 +120,6 @@ impl App {
             is_log_focused: false,
             last_log_count: 0,
         })
-    }
-
-    fn update_current_response(&mut self, content: &str) {
-        debug!("Appending content to current response: {}", content);
-        self.current_response.push_str(content);
-        
-        // Update the last message if it's from the assistant
-        if let Some(last_msg) = self.chatbot.conversation.last_message_mut() {
-            if last_msg.role == "assistant" {
-                debug!("Updating assistant message with new content");
-                // Update both raw and rendered content
-                last_msg.raw_content = self.current_response.clone();
-                last_msg.rendered_content = markdown::markdown_to_lines(&self.current_response);
-                
-                // Auto-scroll to bottom when updating response
-                self.scroll = usize::MAX; // This will be clamped to max_scroll in ui()
-            } else {
-                debug!("Last message is not from assistant (role: {})", last_msg.role);
-            }
-        } else {
-            debug!("No last message found in conversation");
-        }
-
-        // When the response is complete, add it to the chatbot's history
-        if content.trim().is_empty() {
-            debug!("Empty content received, finalizing response");
-            if !self.current_response.is_empty() {
-                debug!("Adding final assistant message to history");
-                self.chatbot.add_message("assistant", &self.current_response);
-                self.current_response.clear(); // Clear the current response buffer
-            } else {
-                debug!("No content to add to history");
-            }
-        }
     }
 }
 
@@ -262,69 +228,36 @@ async fn main() -> Result<()> {
                                     }
                                 } else {
                                     // Immediately display user message
-                                    app.messages.push(format!("You: {}", input));
+                                    // app.messages.push(format!("You: {}", input));
+                                    app.chatbot.add_message("user", &input);
                                     // Force a redraw to show the user message
                                     terminal.draw(|f| ui(f, &mut app))?;
-                                    match app.chatbot.send_message(&input).await {
+                                    match app.chatbot.querry(&input).await {
                                         Ok(mut stream) => {
-                                            debug!("Successfully established message stream");
-                                            // Reset scroll to bottom for new conversation
-                                            app.scroll = usize::MAX;
+                                            app.chatbot.add_message("assistant", ""); // Add empty message that will be updated
                                             app.current_response.clear();
-                                                    
-                                            // Only add the "Assistant: " prefix when we start receiving content
-                                            let mut is_first_chunk = true;
-                                            let mut received_bytes = 0;
-                                            let mut chunk_count = 0;
-                                                    
+                                            
                                             while let Some(chunk_result) = stream.next().await {
-                                                chunk_count += 1;
                                                 match chunk_result {
                                                     Ok(content) => {
-                                                        received_bytes += content.len();
-                                                        debug!("Received chunk {} ({} bytes)", chunk_count, content.len());
-                                                                
                                                         if !content.is_empty() {
-                                                            if is_first_chunk {
-                                                                debug!("First content chunk received, adding assistant prefix");
-                                                                app.messages.push("Assistant: ".to_string());
-                                                                app.messages.push("▌".to_string()); // Typing indicator
-                                                                is_first_chunk = false;
-                                                            } else {
-                                                                // Remove typing indicator if present
-                                                                if let Some(last) = app.messages.last_mut() {
-                                                                    if last == "▌" {
-                                                                        debug!("Removing typing indicator");
-                                                                        app.messages.pop();
-                                                                    }
-                                                                }
-                                                            }
-                                                                    
-                                                            debug!("Updating current response with content: {}", content);
-                                                            app.update_current_response(&content);
-                                                                    
-                                                            // Force redraw to show updates
+                                                            app.current_response.push_str(&content);
+                                                            app.chatbot.update_last_message(&app.current_response);
                                                             terminal.draw(|f| ui(f, &mut app))?;
-                                                        } else {
-                                                            debug!("Received empty content chunk");
                                                         }
                                                     }
                                                     Err(e) => {
-                                                        error!("Error receiving chunk {}: {}", chunk_count, e);
-                                                        app.messages.push(format!("Error: {}", e));
+                                                        error!("Error receiving chunk: {}", e);
                                                         break;
                                                     }
                                                 }
                                             }
-                                                    
-                                            debug!("Stream completed - received {} chunks, {} total bytes", chunk_count, received_bytes);
-                                            if received_bytes == 0 {
-                                                warn!("No content received from stream");
-                                                app.messages.push("Error: No response received from assistant".to_string());
-                                            }
+                                            
+                                            // Clear current response after streaming is complete
+                                            app.current_response.clear();
                                         }
                                         Err(e) => {
-                                            app.messages.push(format!("Error: {}", e));
+                                            error!("Failed to send message: {}", e);
                                         }
                                     }
                                 }
@@ -391,6 +324,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+//ui code will be called every time app draw is called
 fn ui(f: &mut Frame, app: &mut App) {
     // Remove or define create_custom_skin if needed
     // let _md_skin = ChatBot::create_custom_skin();
@@ -405,11 +339,34 @@ fn ui(f: &mut Frame, app: &mut App) {
         ])
         .split(f.size());
 
-    // Get pre-rendered messages from conversation
-    let messages_text = app.chatbot.conversation.get_rendered_messages();
+    // Get all chatbot messages to render
+    let mut messages_to_display = Vec::new();
+    
+    // Add all completed messages
+    for message in &app.chatbot.messages {
+        // Add role prefix
+        let prefix = match message.role.as_str() {
+            "assistant" => Span::styled("Assistant: ", Style::default().fg(Color::Green)),
+            "user" => Span::styled("User: ", Style::default().fg(Color::Blue)),
+            _ => Span::raw("System: "),
+        };
+        messages_to_display.push(Line::from(vec![prefix]));
+        
+        // Add rendered content
+        if message.role == "assistant" {
+            messages_to_display.extend(message.rendered_content.clone());
+        } else {
+            messages_to_display.push(Line::from(message.raw_content.as_str()));
+        }
+    }
+    
+    // If there's a current response being streamed, update the last message
+    // if !app.current_response.is_empty() {
+    //     app.chatbot.update_last_message(&app.current_response);
+    // }
 
     // Calculate scroll and content metrics
-    let total_message_height = messages_text.len();
+    let total_message_height = messages_to_display.len();
     let visible_height = chunks[0].height.saturating_sub(2) as usize; // Subtract 2 for borders
     let max_scroll = if total_message_height > visible_height {
         total_message_height - visible_height
@@ -434,9 +391,9 @@ fn ui(f: &mut Frame, app: &mut App) {
     };
 
     // Render messages with the current scroll position
-    let messages = Paragraph::new(messages_text.clone())
+    let messages = Paragraph::new(messages_to_display.clone())
         .block(Block::default()
-            .title("Messages")
+            .title("Chat")
             .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
             .border_type(BorderType::Rounded))
         .wrap(Wrap { trim: true })
@@ -514,7 +471,7 @@ fn ui(f: &mut Frame, app: &mut App) {
             .style(if app.is_log_focused {
                 Style::default().fg(Color::Yellow)
             } else {
-                Style::default()
+                Style::default().add_modifier(Modifier::DIM)
             }))
         .wrap(Wrap { trim: true })
         .scroll((0, 0));
