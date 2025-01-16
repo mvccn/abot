@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::llama;
 use crate::web_search::WebSearch;
 use bytes::Bytes;
-use crate::config::{Config, ModelConfig};
+use crate::config::Config;
 use ratatui::prelude::{Line, Span, Style, Color};
 use crate::markdown;
 
@@ -25,7 +25,7 @@ impl Message {
         Self::with_rendered(role, content, role == "assistant")
     }
 
-    pub fn with_rendered(role: &str, content: &str, should_render: bool) -> Self {
+    pub fn with_rendered(role: &str, content: &str, _should_render: bool) -> Self {
         let rendered = if role == "assistant" {
             markdown::markdown_to_lines(content)
         } else {

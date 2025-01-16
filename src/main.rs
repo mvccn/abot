@@ -6,6 +6,7 @@ use crossterm::{
 };
 use futures::StreamExt;
 use log::{LevelFilter, Log, Metadata, Record, info, error};
+use std::any::Any;
 use ratatui::{
     prelude::*,
     style::Style,
@@ -41,6 +42,12 @@ impl UiLogger {
     }
 }
 
+impl UiLogger {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 impl Log for UiLogger {
     fn enabled(&self, _metadata: &Metadata) -> bool {
         true
@@ -49,10 +56,11 @@ impl Log for UiLogger {
     fn log(&self, record: &Record) {
         let message = format!("[{}] {}", record.level(), record.args());
         if let Ok(mut buffer) = self.buffer.lock() {
+            let len = buffer.len();
             buffer.push(message);
             // Keep only the last max_lines messages
-            if buffer.len() > self.max_lines {
-                buffer.drain(0..buffer.len() - self.max_lines);
+            if len > self.max_lines {
+                buffer.drain(0..len - self.max_lines);
             }
         }
     }
@@ -119,7 +127,7 @@ async fn main() -> Result<()> {
     let log_buffer = logger.buffer.clone();
     
     // Only initialize logger if not already initialized
-    if log::logger().as_any().type_id() != std::any::TypeId::of::<UiLogger>() {
+    if log::logger().downcast_ref::<UiLogger>().is_none() {
         log::set_boxed_logger(Box::new(logger))
             .map(|()| log::set_max_level(LevelFilter::Debug))?;
     }
