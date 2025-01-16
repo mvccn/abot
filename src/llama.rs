@@ -84,15 +84,34 @@ impl LlamaClient {
         info!("Generating response using model: {}", self.config.model);
         debug!("API URL: {}", self.config.api_url);
         
-        let request = ChatRequest {
-            model: self.config.model.clone(),
-            messages: messages.to_vec(),
-            stream: self.config.stream.unwrap_or_else(|| true),
-            temperature: self.config.temperature.unwrap_or(0.7),
-            max_tokens: self.config.max_tokens,
+        // Format messages for Llama provider
+        let prompt = messages.iter()
+            .map(|msg| format!("{}: {}", msg.role, msg.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+            
+        let request = if self.config.api_url.contains("ollama") {
+            // Ollama format
+            serde_json::json!({
+                "model": self.config.model,
+                "prompt": prompt,
+                "stream": self.config.stream.unwrap_or(true),
+                "options": {
+                    "temperature": self.config.temperature.unwrap_or(0.7),
+                    "num_predict": self.config.max_tokens
+                }
+            })
+        } else {
+            // Llama.cpp format
+            serde_json::json!({
+                "prompt": prompt,
+                "stream": self.config.stream.unwrap_or(true),
+                "temperature": self.config.temperature.unwrap_or(0.7),
+                "n_predict": self.config.max_tokens
+            })
         };
         
-        debug!("Request payload: {:?}", request);
+        debug!("Request payload: {}", request);
 
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -136,31 +155,41 @@ impl LlamaClient {
     // Helper method to extract text from a response
     pub async fn get_response_text(response: Response) -> Result<String> {
         debug!("Parsing LLM response...");
-        let completion: CompletionResponse = response
-            .json()
-            .await
-            .context("Failed to parse response")
-            .map_err(|e| {
-                error!("Failed to parse LLM response: {}", e);
-                LlamaError::ResponseParseError(e.to_string())
-            })?;
-
-        // Handle different response formats
-        if !completion.response.is_empty() {
-            // Ollama format
-            Ok(completion.response)
-        } else if let Some(choice) = completion.choices.first() {
-            // OpenAI/Deepseek format
-            if let Some(message) = &choice.message {
-                Ok(message.content.clone())
-            } else if let Some(delta) = &choice.delta {
-                Ok(delta.content.clone())
-            } else {
-                Err(LlamaError::ResponseParseError("No content in response".to_string()).into())
+        
+        // First try to parse as Ollama/Llama format
+        let response_text = response.text().await?;
+        
+        if let Ok(ollama_response) = serde_json::from_str::<serde_json::Value>(&response_text) {
+            if let Some(response) = ollama_response["response"].as_str() {
+                return Ok(response.to_string());
             }
-        } else {
-            Err(LlamaError::ResponseParseError("Empty response".to_string()).into())
+            if let Some(message) = ollama_response["message"]["content"].as_str() {
+                return Ok(message.to_string());
+            }
         }
+        
+        // Try to parse as OpenAI/Deepseek format
+        if let Ok(completion) = serde_json::from_str::<CompletionResponse>(&response_text) {
+            if !completion.response.is_empty() {
+                return Ok(completion.response);
+            }
+            if let Some(choice) = completion.choices.first() {
+                if let Some(message) = &choice.message {
+                    return Ok(message.content.clone());
+                }
+                if let Some(delta) = &choice.delta {
+                    return Ok(delta.content.clone());
+                }
+            }
+        }
+        
+        // Try to parse as raw text
+        if !response_text.trim().is_empty() {
+            return Ok(response_text);
+        }
+        
+        error!("Failed to parse LLM response: {}", response_text);
+        Err(LlamaError::ResponseParseError("No valid response format detected".to_string()).into())
     }
 
     pub fn set_provider(config: &Config, provider: &str) -> Result<Self> {
