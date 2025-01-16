@@ -123,24 +123,36 @@ impl App {
     }
 
     fn update_current_response(&mut self, content: &str) {
+        debug!("Appending content to current response: {}", content);
         self.current_response.push_str(content);
         
         // Update the last message if it's from the assistant
         if let Some(last_msg) = self.chatbot.conversation.last_message_mut() {
             if last_msg.role == "assistant" {
+                debug!("Updating assistant message with new content");
                 // Update both raw and rendered content
                 last_msg.raw_content = self.current_response.clone();
                 last_msg.rendered_content = markdown::markdown_to_lines(&self.current_response);
                 
                 // Auto-scroll to bottom when updating response
                 self.scroll = usize::MAX; // This will be clamped to max_scroll in ui()
+            } else {
+                debug!("Last message is not from assistant (role: {})", last_msg.role);
             }
+        } else {
+            debug!("No last message found in conversation");
         }
 
         // When the response is complete, add it to the chatbot's history
         if content.trim().is_empty() {
-            self.chatbot.add_message("assistant", &self.current_response);
-            self.current_response.clear(); // Clear the current response buffer
+            debug!("Empty content received, finalizing response");
+            if !self.current_response.is_empty() {
+                debug!("Adding final assistant message to history");
+                self.chatbot.add_message("assistant", &self.current_response);
+                self.current_response.clear(); // Clear the current response buffer
+            } else {
+                debug!("No content to add to history");
+            }
         }
     }
 }
@@ -255,17 +267,26 @@ async fn main() -> Result<()> {
                                     terminal.draw(|f| ui(f, &mut app))?;
                                     match app.chatbot.send_message(&input).await {
                                         Ok(mut stream) => {
+                                            debug!("Successfully established message stream");
                                             // Reset scroll to bottom for new conversation
                                             app.scroll = usize::MAX;
                                             app.current_response.clear();
-                                            
+                                                    
                                             // Only add the "Assistant: " prefix when we start receiving content
                                             let mut is_first_chunk = true;
+                                            let mut received_bytes = 0;
+                                            let mut chunk_count = 0;
+                                                    
                                             while let Some(chunk_result) = stream.next().await {
+                                                chunk_count += 1;
                                                 match chunk_result {
                                                     Ok(content) => {
+                                                        received_bytes += content.len();
+                                                        debug!("Received chunk {} ({} bytes)", chunk_count, content.len());
+                                                                
                                                         if !content.is_empty() {
                                                             if is_first_chunk {
+                                                                debug!("First content chunk received, adding assistant prefix");
                                                                 app.messages.push("Assistant: ".to_string());
                                                                 app.messages.push("▌".to_string()); // Typing indicator
                                                                 is_first_chunk = false;
@@ -273,18 +294,33 @@ async fn main() -> Result<()> {
                                                                 // Remove typing indicator if present
                                                                 if let Some(last) = app.messages.last_mut() {
                                                                     if last == "▌" {
+                                                                        debug!("Removing typing indicator");
                                                                         app.messages.pop();
                                                                     }
                                                                 }
                                                             }
+                                                                    
+                                                            debug!("Updating current response with content: {}", content);
                                                             app.update_current_response(&content);
+                                                                    
+                                                            // Force redraw to show updates
                                                             terminal.draw(|f| ui(f, &mut app))?;
+                                                        } else {
+                                                            debug!("Received empty content chunk");
                                                         }
                                                     }
                                                     Err(e) => {
+                                                        error!("Error receiving chunk {}: {}", chunk_count, e);
                                                         app.messages.push(format!("Error: {}", e));
+                                                        break;
                                                     }
                                                 }
+                                            }
+                                                    
+                                            debug!("Stream completed - received {} chunks, {} total bytes", chunk_count, received_bytes);
+                                            if received_bytes == 0 {
+                                                warn!("No content received from stream");
+                                                app.messages.push("Error: No response received from assistant".to_string());
                                             }
                                         }
                                         Err(e) => {
