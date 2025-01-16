@@ -61,16 +61,6 @@ struct App {
 impl App {
     async fn new(config: Config) -> Result<Self> {
         let log_buffer = Arc::new(Mutex::new(Vec::new()));
-        
-        // Initialize logger
-        let logger = UiLogger {
-            buffer: log_buffer.clone(),
-        };
-        
-        // Set up the logger
-        log::set_boxed_logger(Box::new(logger))
-            .map(|()| log::set_max_level(LevelFilter::Info))?;
-
         let chatbot = ChatBot::new(config).await?;
         
         Ok(Self {
@@ -106,14 +96,17 @@ impl App {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logger
+    // Initialize logger with buffer
     let log_buffer = Arc::new(Mutex::new(Vec::new()));
     let logger = UiLogger {
         buffer: log_buffer.clone(),
     };
     
-    log::set_boxed_logger(Box::new(logger))
-        .map(|()| log::set_max_level(LevelFilter::Info))?;
+    // Only initialize logger if not already initialized
+    if log::logger().as_ref().type_id() != std::any::TypeId::of::<UiLogger>() {
+        log::set_boxed_logger(Box::new(logger))
+            .map(|()| log::set_max_level(LevelFilter::Info))?;
+    }
 
     // Setup terminal
     enable_raw_mode()?;
