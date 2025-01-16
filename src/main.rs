@@ -102,6 +102,7 @@ struct App {
     is_log_focused: bool,
     last_log_count: usize,  // Track number of log lines to detect new messages
     last_message_count: usize,  // Add this new field to track message count
+    raw_mode: bool,         // Whether to show raw content instead of rendered markdown
 }
 
 impl App {
@@ -121,6 +122,7 @@ impl App {
             is_log_focused: false,
             last_log_count: 0,
             last_message_count: 0,
+            raw_mode: false,
         })
     }
 
@@ -246,6 +248,10 @@ async fn main() -> Result<()> {
                                             } else {
                                                 error!("Usage: /model <provider>");
                                             }
+                                        }
+                                        "raw" => {
+                                            app.raw_mode = !app.raw_mode;
+                                            app.info_message = format!("Raw mode {}", if app.raw_mode { "enabled" } else { "disabled" });
                                         }
                                         _ => {
                                             error!("Unknown command: {}", input);
@@ -373,10 +379,9 @@ fn ui(f: &mut Frame, app: &mut App) {
         };
         messages_to_display.push(Line::from(vec![prefix]));
         
-        // Show raw content if message starts with /raw
-        if message.raw_content.starts_with("/raw") {
-            let raw_content = message.raw_content.replacen("/raw", "", 1).trim_start().to_string();
-            messages_to_display.push(Line::from(raw_content));
+        // Show raw content if raw mode is enabled
+        if app.raw_mode {
+            messages_to_display.push(Line::from(message.raw_content.as_str()));
         } else if message.role == "assistant" {
             messages_to_display.extend(message.rendered_content.clone());
         } else {
