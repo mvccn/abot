@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use log::{info, LevelFilter, Log, Metadata, Record};
+use log::{LevelFilter, Log, Metadata, Record, info};
 use ratatui::{
     prelude::*,
     style::{Color, Style},
@@ -104,9 +104,6 @@ impl App {
         }
     }
 
-    fn print_info(&mut self, message: String) {
-        self.info_message = message;
-    }
 }
 
 #[tokio::main]
@@ -167,10 +164,7 @@ async fn main() -> Result<()> {
                                                         e
                                                     ));
                                                 } else {
-                                                    app.print_info(format!(
-                                                        "Switched to provider: {}",
-                                                        provider
-                                                    ));
+                                                   info!("Switched to provider: {}", provider);
                                                 }
                                             } else {
                                                 app.messages

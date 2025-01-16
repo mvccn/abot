@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use log::info;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WebSearchConfig {
