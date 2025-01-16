@@ -40,6 +40,10 @@ impl UiLogger {
             max_lines,
         }
     }
+
+    pub fn get_line_count(&self) -> usize {
+        self.buffer.lock().unwrap().len()
+    }
 }
 
 impl UiLogger {
@@ -62,6 +66,10 @@ impl Log for UiLogger {
             if len > self.max_lines {
                 buffer.drain(0..len - self.max_lines);
             }
+            // Notify about new log message
+            if let Some(app) = APP.get() {
+                app.log_scroll = usize::MAX; // Auto-scroll to bottom
+            }
         }
     }
 
@@ -69,6 +77,8 @@ impl Log for UiLogger {
 }
 
 // Modify App struct to include log buffer
+static APP: std::sync::OnceLock<&'static mut App> = std::sync::OnceLock::new();
+
 struct App {
     chatbot: ChatBot,
     input: String,
@@ -80,13 +90,14 @@ struct App {
     visible_height: u16,
     log_scroll: usize,
     is_log_focused: bool,
+    last_log_count: usize,  // Track number of log lines to detect new messages
 }
 
 impl App {
     async fn new(config: Config, log_buffer: Arc<Mutex<Vec<String>>>) -> Result<Self> {
         let chatbot = ChatBot::new(config).await?;
         
-        Ok(Self {
+        let app = Self {
             chatbot,
             input: String::new(),
             messages: Vec::new(),
@@ -97,7 +108,13 @@ impl App {
             visible_height: 0,
             log_scroll: 0,
             is_log_focused: false,
-        })
+            last_log_count: 0,
+        };
+        
+        // Store app reference for logger
+        APP.set(Box::leak(Box::new(app))).unwrap();
+        
+        Ok(APP.get().unwrap().clone())
     }
 
     fn update_current_response(&mut self, content: &str) {
@@ -152,6 +169,13 @@ async fn main() -> Result<()> {
 
     // Main loop
     loop {
+        // Check for new log messages and auto-scroll if needed
+        let current_log_count = logger.get_line_count();
+        if current_log_count > app.last_log_count {
+            app.log_scroll = usize::MAX; // Auto-scroll to bottom
+            app.last_log_count = current_log_count;
+        }
+
         terminal.draw(|f| ui(f, &mut app))?;
 
         if event::poll(std::time::Duration::from_millis(100))? {
