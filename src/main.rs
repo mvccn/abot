@@ -475,7 +475,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     // Calculate available width for text (accounting for borders and padding)
     let text_width = msg_area.width.saturating_sub(2); // 1 char padding on each side
     
-    // Render messages with exact formatting
+    // Render messages with exact formatting, but don't wrap table lines
     let messages = Paragraph::new(messages_to_display.clone())
         .block(Block::default()
             .title("Chat")
@@ -483,7 +483,18 @@ fn ui(f: &mut Frame, app: &mut App) {
             .border_type(BorderType::Rounded))
         .wrap(Wrap { trim: false })
         .scroll((app.scroll as u16, 0))
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(Color::White))
+        .wrap_fn(|text, width| {
+            // Don't wrap lines that start with | (table lines)
+            if text.starts_with('|') {
+                vec![text.to_string()]
+            } else {
+                textwrap::wrap(text, width as usize)
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            }
+        });
     
     // Use a custom render method to handle wrapping properly
     f.render_widget(messages, msg_area.inner(&Margin {
