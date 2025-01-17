@@ -220,7 +220,17 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     
                     handle_code_block(&text, syntax, theme, &ps, &mut lines);
                 } else {
-                    current_spans.push(Span::styled(text.to_string(), current_style));
+                    // Split text on newlines and preserve them
+                    let text_lines: Vec<&str> = text.split('\n').collect();
+                    for (i, line) in text_lines.iter().enumerate() {
+                        if !line.is_empty() {
+                            current_spans.push(Span::styled(line.to_string(), current_style));
+                        }
+                        if i < text_lines.len() - 1 {
+                            // Add a new line after each line except the last one
+                            lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
+                        }
+                    }
                 }
             }
             Event::Code(text) => {
