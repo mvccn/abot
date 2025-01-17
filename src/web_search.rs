@@ -137,7 +137,7 @@ impl WebSearch {
                 .collect::<Vec<_>>()
                 .join("\n")
         }).await {
-            Ok(content) => content?,
+            Ok(content) => content,
             Err(e) => return Err(anyhow::anyhow!("Failed to parse HTML: {}", e)),
         };
 
