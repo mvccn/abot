@@ -33,7 +33,8 @@ log = "0.4"
 env_logger = "0.10"
 ratatui = "0.26.1"
 bytes = "1.0"
-
+syntect = "5.0"
+lazy_static = "1.4"
 [[bin]]
 name = "abot"
 path = "src/main.rs"
