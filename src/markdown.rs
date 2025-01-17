@@ -232,9 +232,12 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 current_spans.push(Span::styled(" |", current_style));
             }
             Event::End(Tag::TableRow) => {
-                // End of table row - add newline
-                current_spans.push(Span::raw("\n"));
-                lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
+                // End of table row - add newline and ensure proper spacing
+                if !current_spans.is_empty() {
+                    lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
+                }
+                // Add empty line after each row for better spacing
+                lines.push(Line::from(Vec::new()));
             }
             Event::End(Tag::TableHead) => {
                 // End of table header - add separator line
