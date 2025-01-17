@@ -475,13 +475,12 @@ fn ui(f: &mut Frame, app: &mut App) {
     // Calculate available width for text (accounting for borders and padding)
     let text_width = msg_area.width.saturating_sub(2); // 1 char padding on each side
     
-    // Render messages with proper wrapping
+    // Render messages with exact formatting
     let messages = Paragraph::new(messages_to_display.clone())
         .block(Block::default()
             .title("Chat")
             .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
             .border_type(BorderType::Rounded))
-        // .wrap(Wrap { trim: false })
         .scroll((app.scroll as u16, 0))
         .style(Style::default().fg(Color::White));
     

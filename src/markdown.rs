@@ -65,36 +65,13 @@ fn handle_code_block(
     // Split text while preserving empty lines and indentation
     let text_lines: Vec<&str> = text.lines().collect();
     
-    // Calculate the minimum indentation level
-    let min_indent = text_lines.iter()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.chars().take_while(|c| c.is_whitespace()).count())
-        .min()
-        .unwrap_or(0);
-
     for line in text_lines {
         let mut line_spans = Vec::new();
         
-        // Calculate the actual indentation level
-        let indent_level = line.chars()
-            .take_while(|c| c.is_whitespace())
-            .count();
-        
-        // Calculate the relative indentation
-        let relative_indent = indent_level.saturating_sub(min_indent);
-        
-        // Add the relative indentation
-        if relative_indent > 0 {
-            line_spans.push(Span::raw(" ".repeat(relative_indent)));
-        }
-        
-        // Highlight the actual code content with proper width handling
-        let code_content = line.trim_start();
-        let ranges = h.highlight_line(code_content, ps)
+        // Highlight the entire line exactly as it appears
+        let ranges = h.highlight_line(line, ps)
             .unwrap_or_default();
             
-        // Split long code lines to fit available width
-        let mut current_line = String::new();
         for (style, text) in ranges {
             let color = Style::default()
                 .fg(convert_syntect_color(style.foreground))
@@ -104,24 +81,7 @@ fn handle_code_block(
                     Modifier::empty()
                 });
                 
-            // Split text if it would exceed available width
-            for word in text.split_inclusive(' ') {
-                if current_line.len() + word.len() > text_width {
-                    line_spans.push(Span::styled(current_line.trim_end(), color));
-                    current_line = String::new();
-                }
-                current_line.push_str(word);
-            }
-        }
-        
-        // Add any remaining content
-        if !current_line.is_empty() {
-            line_spans.push(Span::styled(current_line, color));
-        }
-        
-        // If the line was empty, preserve it exactly
-        if line.trim().is_empty() {
-            line_spans.push(Span::raw(""));
+            line_spans.push(Span::styled(text.to_string(), color));
         }
         
         lines.push(Line::from(line_spans));
