@@ -185,28 +185,28 @@ impl ChatBot {
     }
 
     pub async fn querry(&mut self, message: &str) -> Result<MessageStream> {
-        // self.add_message("user", message);
-
         let is_web_search = message.contains("@web");
-
         let query = message
             .split_whitespace()
             .filter(|word| !word.starts_with('#') && !word.starts_with('@'))
             .collect::<Vec<_>>()
             .join(" ");
 
-        let _message = if is_web_search {
+        // If it's a web search, spawn a background task
+        if is_web_search {
             debug!("Performing web search for query: '{}'", query);
-            let web_results = self.web_search.search(&query).await
-                .with_context(|| format!("Failed to perform web search for query: '{}'", query))?;
-            format!(
-                "Based on the following web search results, please answer the question: '{}'\n\nSearch Results:\n{}",
-                query,
-                web_results
-            )
-        } else {
-            query
-        };
+            let web_search = self.web_search.clone();
+            let query_clone = query.clone();
+            
+            // Spawn the web search in a background task
+            tokio::spawn(async move {
+                if let Err(e) = web_search.search(&query_clone).await {
+                    error!("Web search failed: {}", e);
+                }
+            });
+        }
+
+        let _message = query;
 
         debug!("Sending request to provider: {} at {}", self.current_provider, self.llama_client.config.api_url);
 

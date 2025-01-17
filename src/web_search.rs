@@ -188,7 +188,7 @@ impl WebSearch {
         Ok(cached_doc)
     }
 
-    pub async fn search(&mut self, query: &str) -> Result<String> {
+    pub async fn search(&self, query: &str) -> Result<String> {
         #[cfg(debug_assertions)]
         debug!("Starting search with query: {}", query);
 
