@@ -109,7 +109,7 @@ impl WebSearch {
         .await?;
         
         // Parse HTML in a blocking task to avoid Send issues
-        let content = tokio::task::spawn_blocking(move || {
+        let content = match tokio::task::spawn_blocking(move || {
             let document = Html::parse_document(&response);
             
             // Remove unwanted elements
@@ -136,7 +136,10 @@ impl WebSearch {
                 .filter(|text| !text.is_empty())
                 .collect::<Vec<_>>()
                 .join("\n")
-        }).await??;
+        }).await {
+            Ok(content) => content?,
+            Err(e) => return Err(anyhow::anyhow!("Failed to parse HTML: {}", e)),
+        };
 
         // Add debug output
         #[cfg(debug_assertions)]
