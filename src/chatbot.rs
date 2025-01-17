@@ -199,6 +199,17 @@ impl ChatBot {
             let query_clone = query.clone();
             
             // Spawn the web search in a background task
+            // Create a new WebSearch instance for the background task
+            let mut web_search = WebSearch {
+                client: web_search.client.clone(),
+                cache_dir: web_search.cache_dir.clone(),
+                conversation_id: web_search.conversation_id.clone(),
+                max_results: web_search.max_results,
+                llama: web_search.llama.clone(),
+                query: String::new(),
+                use_llama: web_search.use_llama,
+            };
+            
             tokio::spawn(async move {
                 if let Err(e) = web_search.search(&query_clone).await {
                     error!("Web search failed: {}", e);
