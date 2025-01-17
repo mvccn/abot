@@ -117,33 +117,34 @@ impl WebSearch {
         let content = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             tokio::task::spawn_blocking(move || {
-            let document = Html::parse_document(&response);
-            
-            // Remove unwanted elements
-            let selector_to_remove = Selector::parse("script, style, meta, link, noscript, iframe, svg").unwrap();
-            let text_selectors = Selector::parse("p, h1, h2, h3, h4, h5, h6, article, section, main, div > text").unwrap();
-            
-            // Extract meaningful text content
-            document
-                .select(&text_selectors)
-                .map(|element| {
-                    // Skip if this element or its parent is in the removal list
-                    if element.select(&selector_to_remove).next().is_some() {
-                        return String::new();
-                    }
-                    
-                    // Get text content, normalize whitespace
-                    element.text()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                        .split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
-                .filter(|text| !text.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        }).await {
+                let document = Html::parse_document(&response);
+                
+                // Remove unwanted elements
+                let selector_to_remove = Selector::parse("script, style, meta, link, noscript, iframe, svg").unwrap();
+                let text_selectors = Selector::parse("p, h1, h2, h3, h4, h5, h6, article, section, main, div > text").unwrap();
+                
+                // Extract meaningful text content
+                document
+                    .select(&text_selectors)
+                    .map(|element| {
+                        // Skip if this element or its parent is in the removal list
+                        if element.select(&selector_to_remove).next().is_some() {
+                            return String::new();
+                        }
+                        
+                        // Get text content, normalize whitespace
+                        element.text()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+        ).await {
             Ok(content) => content,
             Err(e) => return Err(anyhow::anyhow!("Failed to parse HTML: {}", e)),
         };
