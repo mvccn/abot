@@ -1,10 +1,8 @@
-use pulldown_cmark::{Parser, Event, Tag, Alignment};
+use pulldown_cmark::{Parser, Event, Tag};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{Row, Table},
 };
-use std::cmp::max;
 use syntect::{
     easy::HighlightLines,
     highlighting::ThemeSet,
@@ -214,12 +212,8 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 if !current_spans.is_empty() {
                     lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                 }
-                // Start collecting table rows
                 current_spans.push(Span::styled("Table:\n", current_style));
                 lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
-                
-                // Store alignments for later use
-                current_spans.push(Span::raw(format!("{:?}", alignments)));
             }
             Event::Start(Tag::TableHead) => {
                 // Start of table header
@@ -254,7 +248,7 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 }
                 lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
             }
-            Event::End(Tag::Table) => {
+            Event::End(Tag::Table(_)) => {
                 // End of table - add empty line
                 lines.push(Line::from(Vec::new()));
             }
