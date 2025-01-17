@@ -208,54 +208,6 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 }
                 _ => {}
             },
-            Event::Start(Tag::Table(alignments)) => {
-                if !current_spans.is_empty() {
-                    lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
-                }
-                current_spans.push(Span::styled("Table:\n", current_style));
-                lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
-            }
-            Event::Start(Tag::TableHead) => {
-                // Start of table header
-                current_spans.push(Span::styled("| ", current_style));
-            }
-            Event::Start(Tag::TableRow) => {
-                // Start of table row
-                current_spans.push(Span::styled("| ", current_style));
-            }
-            Event::Start(Tag::TableCell) => {
-                // Start of table cell
-                current_spans.push(Span::styled(" ", current_style));
-            }
-            Event::End(Tag::TableCell) => {
-                // End of table cell
-                current_spans.push(Span::styled(" |", current_style));
-            }
-            Event::End(Tag::TableRow) => {
-                // End of table row - add newline and ensure proper spacing
-                if !current_spans.is_empty() {
-                    lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
-                }
-                // Add empty line after each row for better spacing
-                lines.push(Line::from(Vec::new()));
-            }
-            Event::End(Tag::TableHead) => {
-                // End of table header - add separator line
-                if let Some(alignments) = current_spans.first().and_then(|s| s.content.strip_prefix('"').and_then(|s| s.strip_suffix('"'))) {
-                    let sep = alignments.chars().map(|c| match c {
-                        'L' => ":--",
-                        'R' => "--:",
-                        'C' => ":-:",
-                        _ => "---",
-                    }).collect::<Vec<_>>().join("|");
-                    lines.push(Line::from(Span::styled(format!("|{}|\n", sep), current_style)));
-                }
-                lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
-            }
-            Event::End(Tag::Table(_)) => {
-                // End of table - add empty line
-                lines.push(Line::from(Vec::new()));
-            }
             Event::Text(text) => {
                 if code_block {
                     let syntax = if current_language == "Plain Text" {
