@@ -44,6 +44,12 @@ lazy_static::lazy_static! {
 
 fn detect_language(lang_hint: &str) -> Option<&'static str> {
     let lang_lower = lang_hint.to_lowercase();
+    
+    // Special handling for HTML
+    if lang_lower == "html" || lang_lower.starts_with("html:") {
+        return Some("HTML");
+    }
+    
     LANGUAGE_ALIASES.get(lang_lower.as_str()).copied()
 }
 
@@ -59,10 +65,17 @@ fn handle_code_block(
     // Split text while preserving empty lines and indentation
     let text_lines: Vec<&str> = text.lines().collect();
     
+    // Track the minimum indentation level to maintain relative indentation
+    let min_indent = text_lines.iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|c| c.is_whitespace()).count())
+        .min()
+        .unwrap_or(0);
+    
     for line in text_lines {
         let mut line_spans = Vec::new();
         
-        // Preserve leading whitespace
+        // Preserve all leading whitespace exactly as is
         let leading_whitespace: String = line.chars()
             .take_while(|c| c.is_whitespace())
             .collect();
@@ -84,6 +97,11 @@ fn handle_code_block(
                     Modifier::empty()
                 });
             line_spans.push(Span::styled(text.to_string(), color));
+        }
+        
+        // If the line was empty, preserve it exactly
+        if line.trim().is_empty() {
+            line_spans.push(Span::raw(""));
         }
         
         lines.push(Line::from(line_spans));
