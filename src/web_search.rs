@@ -97,19 +97,26 @@ impl WebSearch {
             }
         }
 
-        // Fetch new content
-        let response = match self.client.get(url).send().await {
-            Ok(resp) => resp,
-            Err(e) => {
+        // Fetch new content with timeout
+        let response = match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.client.get(url).send()
+        ).await {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(e)) => {
                 error!("Error fetching URL '{}': {}", url, e);
                 return Err(anyhow::anyhow!("Failed to fetch URL: {}", e));
+            },
+            Err(_) => {
+                error!("Timeout fetching URL '{}'", url);
+                return Err(anyhow::anyhow!("Timeout fetching URL"));
             }
-        }
-        .text()
-        .await?;
+        }.text().await?;
         
-        // Parse HTML in a blocking task to avoid Send issues
-        let content = match tokio::task::spawn_blocking(move || {
+        // Parse HTML in a blocking task with timeout
+        let content = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || {
             let document = Html::parse_document(&response);
             
             // Remove unwanted elements
@@ -149,16 +156,22 @@ impl WebSearch {
 
         // Modify the summary generation to check use_llama flag
         let summary = if self.use_llama {
-            let summary_prompt = vec![llama::Message {
-                role: "user".to_string(),
-                content: format!(
-                    "Please provide a brief, factual summary of the following text in 2-3 sentences:\n\n{}",
-                    content
-                ),
-            }];
-            
-            match self.llama.generate(&summary_prompt).await {
-                Ok(response) => {
+            // Add timeout to LLM summary generation
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                async {
+                    let summary_prompt = vec![llama::Message {
+                        role: "user".to_string(),
+                        content: format!(
+                            "Please provide a brief, factual summary of the following text in 2-3 sentences:\n\n{}",
+                            content
+                        ),
+                    }];
+                    
+                    self.llama.generate(&summary_prompt).await
+                }
+            ).await {
+                Ok(Ok(response)) => {
                     match LlamaClient::get_response_text(response).await {
                         Ok(text) => text,
                         Err(e) => {
@@ -167,8 +180,12 @@ impl WebSearch {
                         }
                     }
                 },
-                Err(e) => {
+                Ok(Err(e)) => {
                     error!("Warning: Failed to generate LLM summary: {}. Using fallback.", e);
+                    content.chars().take(500).collect::<String>().trim().to_string()
+                },
+                Err(_) => {
+                    error!("Timeout generating LLM summary. Using fallback.");
                     content.chars().take(500).collect::<String>().trim().to_string()
                 }
             }
@@ -199,7 +216,7 @@ impl WebSearch {
         #[cfg(debug_assertions)]
         debug!("Starting search with query: {}", query);
 
-        //save the query to self
+        // Save the query to self
         self.query = query.to_string();
 
         let search_url = format!(
@@ -208,11 +225,20 @@ impl WebSearch {
         );
       
         info!("Fetching search results from DuckDuckGo...");
-        let response = self.client.get(&search_url)
-            .send()
-            .await?
-            .text()
-            .await?;
+        let response = match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.client.get(&search_url).send()
+        ).await {
+            Ok(Ok(resp)) => resp.text().await?,
+            Ok(Err(e)) => {
+                error!("Error fetching search results: {}", e);
+                return Err(anyhow::anyhow!("Failed to fetch search results: {}", e));
+            },
+            Err(_) => {
+                error!("Timeout fetching search results");
+                return Err(anyhow::anyhow!("Timeout fetching search results"));
+            }
+        };
 
         #[cfg(debug_assertions)]
         debug!("Raw DuckDuckGo response length: {} bytes", response.len());
@@ -285,17 +311,26 @@ impl WebSearch {
             debug!("Limiting results to max_results: {}", self.max_results);
         }
         
-        // featch and cache all URLs (limit to first max_results) in search results.
-        let fetch_futures: Vec<_> = search_results.iter()
-            .take(self.max_results)
-            .map(|(url, _)| {
-                debug!("Fetching content from: {}", url);
-                self.fetch_and_cache_url(url)
-            })
-            .collect();
+        // Fetch and cache all URLs (limit to first max_results) in search results.
+        // Process them in batches to avoid overwhelming the system
+        let batch_size = 2; // Process 2 URLs at a time
+        let mut results = Vec::new();
+        
+        for chunk in search_results.iter().take(self.max_results).collect::<Vec<_>>().chunks(batch_size) {
+            let fetch_futures: Vec<_> = chunk.iter()
+                .map(|(url, _)| {
+                    debug!("Fetching content from: {}", url);
+                    self.fetch_and_cache_url(url)
+                })
+                .collect();
 
-        // Fetch all URLs concurrently
-        let results = join_all(fetch_futures).await;
+            // Fetch batch of URLs concurrently
+            let batch_results = join_all(fetch_futures).await;
+            results.extend(batch_results);
+            
+            // Yield control back to the runtime after each batch
+            tokio::task::yield_now().await;
+        }
         
         println!("Processing search results...");
         
