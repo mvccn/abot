@@ -3,13 +3,121 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Span, Line},
 };
+use syntect::{
+    easy::HighlightLines,
+    highlighting::ThemeSet,
+    parsing::SyntaxSet,
+};
+use std::collections::HashMap;
+use log::debug;
+
+lazy_static::lazy_static! {
+    static ref LANGUAGE_ALIASES: HashMap<&'static str, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert("js", "JavaScript");
+        m.insert("ts", "TypeScript");
+        m.insert("py", "Python");
+        m.insert("rs", "Rust");
+        m.insert("cpp", "C++");
+        m.insert("hpp", "C++");
+        m.insert("c", "C");
+        m.insert("h", "C");
+        m.insert("go", "Go");
+        m.insert("rb", "Ruby");
+        m.insert("php", "PHP");
+        m.insert("java", "Java");
+        m.insert("sh", "Bash");
+        m.insert("bash", "Bash");
+        m.insert("yaml", "YAML");
+        m.insert("yml", "YAML");
+        m.insert("json", "JSON");
+        m.insert("md", "Markdown");
+        m.insert("sql", "SQL");
+        m.insert("html", "HTML");
+        m.insert("css", "CSS");
+        m.insert("toml", "TOML");
+        m.insert("rust", "Rust");
+        m.insert("dockerfile", "Dockerfile");
+        m
+    };
+}
+
+fn detect_language(lang_hint: &str) -> Option<&'static str> {
+    let lang_lower = lang_hint.to_lowercase();
+    LANGUAGE_ALIASES.get(lang_lower.as_str()).copied()
+}
+
+fn handle_code_block(
+    text: &str,
+    syntax: &syntect::parsing::SyntaxReference,
+    theme: &syntect::highlighting::Theme,
+    ps: &syntect::parsing::SyntaxSet,
+    list_level: usize,
+    lines: &mut Vec<Line<'static>>
+) {
+    let mut h = HighlightLines::new(syntax, theme);
+    let indent = "  ".repeat(list_level);
+    
+    // Split text while preserving empty lines
+    let text_lines: Vec<&str> = text.lines().collect();
+    
+    // Track consecutive empty lines to preserve formatting
+    let mut empty_line_count = 0;
+    
+    for line in text_lines {
+        if line.trim().is_empty() {
+            empty_line_count += 1;
+            lines.push(Line::from(vec![Span::raw(indent.clone())]));
+            continue;
+        }
+        
+        // Reset empty line counter when we hit non-empty line
+        empty_line_count = 0;
+        
+        let ranges = h.highlight_line(line, ps)
+            .unwrap_or_default();
+            
+        let mut line_spans = Vec::new();
+        line_spans.push(Span::raw(indent.clone()));
+        
+        // Preserve original indentation
+        if let Some(leading_space) = line.chars()
+            .take_while(|c| c.is_whitespace())
+            .collect::<String>()
+            .into() 
+        {
+            line_spans.push(Span::raw(leading_space));
+        }
+        
+        for (style, text) in ranges {
+            let color = Style::default()
+                .fg(convert_syntect_color(style.foreground))
+                .add_modifier(if style.font_style.contains(syntect::highlighting::FontStyle::BOLD) {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                });
+            line_spans.push(Span::styled(text.to_string(), color));
+        }
+        
+        lines.push(Line::from(line_spans));
+    }
+}
 
 pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
+    debug!("Markdown to lines: {:?}", markdown);
+    // Initialize syntax highlighting
+    let ps = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    let theme = &ts.themes["base16-ocean.dark"];
+    
     let parser = Parser::new(markdown);
     let mut lines: Vec<Line> = Vec::new();
     let mut current_spans: Vec<Span> = Vec::new();
     let mut current_style = Style::default();
     let mut code_block = false;
+    let mut current_language = String::new();
+    let mut list_level = 0;  // Track list nesting level
 
     for event in parser {
         match event {
@@ -34,16 +142,45 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                                 .add_modifier(Modifier::BOLD),
                         };
                     }
-                    Tag::CodeBlock(_) => {
+                    Tag::CodeBlock(kind) => {
                         if !current_spans.is_empty() {
                             lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                         }
-                        // Add empty line before code block
                         lines.push(Line::from(Vec::new()));
                         code_block = true;
-                        current_style = Style::default()
-                            .fg(Color::Gray)
-                            .bg(Color::DarkGray);
+                        
+                        // Create owned String for indentation
+                        let indent = "  ".repeat(list_level).to_string();
+                        
+                        // Improved language detection
+                        current_language = match kind {
+                            pulldown_cmark::CodeBlockKind::Fenced(lang) => {
+                                let lang_str = lang.to_string();
+                                // Extract language from code fence, handling cases like ```rust:file.rs
+                                let lang_token = lang_str.split(':').next()
+                                    .unwrap_or(&lang_str)
+                                    .trim();
+                                
+                                // Try to detect language from hint
+                                if let Some(detected_lang) = detect_language(lang_token) {
+                                    detected_lang.to_string()
+                                } else {
+                                    // Fallback to plain text if language not recognized
+                                    "Plain Text".to_string()
+                                }
+                            }
+                            _ => "Plain Text".to_string(),
+                        };
+                        
+                        // Add language indicator with proper indentation
+                        let lang_indicator = format!("// Language: {}", current_language);
+                        lines.push(Line::from(vec![
+                            Span::raw(indent.clone()),
+                            Span::styled(
+                                lang_indicator,
+                                Style::default().fg(Color::DarkGray)
+                            )
+                        ]));
                     }
                     Tag::Emphasis => {
                         current_style = current_style.add_modifier(Modifier::ITALIC);
@@ -66,10 +203,13 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         if !current_spans.is_empty() {
                             lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                         }
-                        // Add empty line before list
+                        list_level += 1;  // Increment nesting level
                         lines.push(Line::from(Vec::new()));
                     }
                     Tag::Item => {
+                        // Add indentation based on nesting level
+                        let indent = "  ".repeat(list_level - 1);
+                        current_spans.push(Span::raw(indent));
                         current_spans.push(Span::styled("• ".to_string(), current_style));
                     }
                     Tag::Link(_, _, _) => {
@@ -77,7 +217,10 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                             .fg(Color::Blue)
                             .add_modifier(Modifier::UNDERLINED);
                     }
-                    _ => {}
+                    _ => {
+                        // Use default style for unknown tags
+                        current_style = Style::default();
+                    }
                 }
             }
             Event::End(tag) => {
@@ -96,16 +239,29 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         }
                         lines.push(Line::from(Vec::new()));
                     }
-                    _ => {}
+                    Tag::List(_) => {
+                        if !current_spans.is_empty() {
+                            lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
+                        }
+                        list_level -= 1;  // Decrement nesting level
+                    }
+                    _ => {
+                        // Reset to default style after any tag
+                        current_style = Style::default();
+                    }
                 }
-                current_style = Style::default();
             }
             Event::Text(text) => {
                 if code_block {
-                    if !current_spans.is_empty() {
-                        lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
-                    }
-                    current_spans.push(Span::styled(text.to_string(), current_style));
+                    let syntax = if current_language == "Plain Text" {
+                        ps.find_syntax_plain_text()
+                    } else {
+                        ps.find_syntax_by_token(&current_language)
+                            .or_else(|| ps.find_syntax_by_extension(&current_language.to_lowercase()))
+                            .unwrap_or_else(|| ps.find_syntax_plain_text())
+                    };
+                    
+                    handle_code_block(&text, syntax, theme, &ps, list_level, &mut lines);
                 } else {
                     current_spans.push(Span::styled(text.to_string(), current_style));
                 }
@@ -124,7 +280,13 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                 }
             }
-            _ => {}
+            _ => {
+                // Handle any unknown events as plain text with default style
+                current_spans.push(Span::styled(
+                    format!("{:?}", event),
+                    Style::default()
+                ));
+            }
         }
     }
 
@@ -133,4 +295,9 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+// Helper function to convert syntect colors to ratatui colors
+fn convert_syntect_color(color: syntect::highlighting::Color) -> Color {
+    Color::Rgb(color.r, color.g, color.b)
 } 
