@@ -65,23 +65,27 @@ fn handle_code_block(
     // Split text while preserving empty lines and indentation
     let text_lines: Vec<&str> = text.lines().collect();
     
-    // Track the minimum indentation level to maintain relative indentation
+    // Calculate the minimum indentation level
     let min_indent = text_lines.iter()
         .filter(|line| !line.trim().is_empty())
         .map(|line| line.chars().take_while(|c| c.is_whitespace()).count())
         .min()
         .unwrap_or(0);
-    
+
     for line in text_lines {
         let mut line_spans = Vec::new();
         
-        // Preserve all leading whitespace exactly as is
-        let leading_whitespace: String = line.chars()
+        // Calculate the actual indentation level
+        let indent_level = line.chars()
             .take_while(|c| c.is_whitespace())
-            .collect();
-            
-        if !leading_whitespace.is_empty() {
-            line_spans.push(Span::raw(leading_whitespace));
+            .count();
+        
+        // Calculate the relative indentation
+        let relative_indent = indent_level.saturating_sub(min_indent);
+        
+        // Add the relative indentation
+        if relative_indent > 0 {
+            line_spans.push(Span::raw(" ".repeat(relative_indent)));
         }
         
         // Highlight the actual code content
