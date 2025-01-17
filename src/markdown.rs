@@ -232,7 +232,8 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 current_spans.push(Span::styled(" |", current_style));
             }
             Event::End(Tag::TableRow) => {
-                // End of table row
+                // End of table row - add newline
+                current_spans.push(Span::raw("\n"));
                 lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
             }
             Event::End(Tag::TableHead) => {
@@ -244,7 +245,7 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         'C' => ":-:",
                         _ => "---",
                     }).collect::<Vec<_>>().join("|");
-                    lines.push(Line::from(Span::styled(format!("|{}|", sep), current_style)));
+                    lines.push(Line::from(Span::styled(format!("|{}|\n", sep), current_style)));
                 }
                 lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
             }
