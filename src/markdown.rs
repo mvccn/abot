@@ -153,16 +153,28 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         .add_modifier(Modifier::ITALIC);
                     current_spans.push(Span::styled("│ ", current_style));
                 }
-                Tag::List(_) => {
+                Tag::List(start) => {
                     if !current_spans.is_empty() {
                         lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                     }
                     list_level += 1;
+                    
+                    // Store the list start number if it's an ordered list
+                    if let Some(start_num) = start {
+                        current_spans.push(Span::raw("  ".repeat(list_level - 1)));
+                        current_spans.push(Span::styled(format!("{}. ", start_num), current_style));
+                    }
                 }
                 Tag::Item => {
-                    let indent = "  ".repeat(list_level - 1);
-                    current_spans.push(Span::raw(indent));
-                    current_spans.push(Span::styled("• ", current_style));
+                    if list_level > 0 {
+                        let indent = "  ".repeat(list_level - 1);
+                        
+                        // Only add bullet if we're not in an ordered list
+                        if current_spans.is_empty() || !current_spans.last().unwrap().content.ends_with(". ") {
+                            current_spans.push(Span::raw(indent));
+                            current_spans.push(Span::styled("• ", current_style));
+                        }
+                    }
                 }
                 Tag::Link(_, _, _) => {
                     current_style = current_style
@@ -190,7 +202,9 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     if !current_spans.is_empty() {
                         lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                     }
-                    list_level -= 1;
+                    list_level = list_level.saturating_sub(1);
+                    // Add an empty line after lists for better spacing
+                    lines.push(Line::from(Vec::new()));
                 }
                 _ => {}
             },
