@@ -21,13 +21,13 @@ pub struct CachedDocument {
 
 #[derive(Debug, Clone)]
 pub struct WebSearch {
-    client: Client,
-    cache_dir: PathBuf,
-    conversation_id: String,
-    max_results: usize,
-    llama: LlamaClient,
-    query: String,
-    use_llama: bool,
+    pub client: Client,
+    pub cache_dir: PathBuf,
+    pub conversation_id: String,
+    pub max_results: usize,
+    pub llama: LlamaClient,
+    pub query: String,
+    pub use_llama: bool,
 }
 
 impl WebSearch {
@@ -109,9 +109,8 @@ impl WebSearch {
         .await?;
         
         // Parse HTML in a synchronous block to avoid Send issues
-        let document = tokio::task::spawn_blocking(move || {
-            Html::parse_document(&response)
-        }).await??;
+        // Parse HTML directly since scraper isn't thread-safe
+        let document = Html::parse_document(&response);
         
         // Remove unwanted elements
         let selector_to_remove = Selector::parse("script, style, meta, link, noscript, iframe, svg").unwrap();
