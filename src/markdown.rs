@@ -88,10 +88,13 @@ fn handle_code_block(
             line_spans.push(Span::raw(" ".repeat(relative_indent)));
         }
         
-        // Highlight the actual code content
-        let ranges = h.highlight_line(line.trim_start(), ps)
+        // Highlight the actual code content with proper width handling
+        let code_content = line.trim_start();
+        let ranges = h.highlight_line(code_content, ps)
             .unwrap_or_default();
             
+        // Split long code lines to fit available width
+        let mut current_line = String::new();
         for (style, text) in ranges {
             let color = Style::default()
                 .fg(convert_syntect_color(style.foreground))
@@ -100,7 +103,20 @@ fn handle_code_block(
                 } else {
                     Modifier::empty()
                 });
-            line_spans.push(Span::styled(text.to_string(), color));
+                
+            // Split text if it would exceed available width
+            for word in text.split_inclusive(' ') {
+                if current_line.len() + word.len() > text_width {
+                    line_spans.push(Span::styled(current_line.trim_end(), color));
+                    current_line = String::new();
+                }
+                current_line.push_str(word);
+            }
+        }
+        
+        // Add any remaining content
+        if !current_line.is_empty() {
+            line_spans.push(Span::styled(current_line, color));
         }
         
         // If the line was empty, preserve it exactly

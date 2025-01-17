@@ -472,15 +472,24 @@ fn ui(f: &mut Frame, app: &mut App) {
         (chunks[0], chunks[1])
     };
 
-    // Render messages with the current scroll position
+    // Calculate available width for text (accounting for borders and padding)
+    let text_width = msg_area.width.saturating_sub(2); // 1 char padding on each side
+    
+    // Render messages with proper wrapping
     let messages = Paragraph::new(messages_to_display.clone())
         .block(Block::default()
             .title("Chat")
             .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
             .border_type(BorderType::Rounded))
         .wrap(Wrap { trim: true })
-        .scroll((app.scroll as u16, 0));
-    f.render_widget(messages, msg_area);
+        .scroll((app.scroll as u16, 0))
+        .style(Style::default().fg(Color::White));
+    
+    // Use a custom render method to handle wrapping properly
+    f.render_widget(messages, msg_area.inner(&Margin {
+        horizontal: 1,
+        vertical: 0,
+    }));
 
     // Update scrollbar to reflect current position
     let scrollbar = Scrollbar::default()
