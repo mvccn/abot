@@ -32,6 +32,7 @@ mod markdown;
 struct UiLogger {
     buffer: Arc<Mutex<Vec<String>>>,
     max_lines: usize,
+    log_scroll: Arc<Mutex<usize>>,
 }
 
 impl UiLogger {
@@ -39,11 +40,8 @@ impl UiLogger {
         Self {
             buffer: Arc::new(Mutex::new(Vec::new())),
             max_lines,
+            log_scroll: Arc::new(Mutex::new(0)),
         }
-    }
-
-    pub fn get_line_count(&self) -> usize {
-        self.buffer.lock().unwrap().len()
     }
 }
 
@@ -74,19 +72,14 @@ impl Log for UiLogger {
                 buffer.drain(0..len - self.max_lines);
             }
             // Notify about new log message
-            unsafe {
-                if let Some(app) = APP.as_mut() {
-                    app.log_scroll = usize::MAX; // Auto-scroll to bottom
-                }
+            if let Ok(mut scroll) = self.log_scroll.lock() {
+                *scroll = usize::MAX; // Auto-scroll to bottom
             }
         }
     }
 
     fn flush(&self) {}
 }
-
-// Modify App struct to include log buffer
-static mut APP: Option<App> = None;
 
 #[derive(Debug)]
 struct App {
@@ -107,6 +100,7 @@ struct App {
                         // but manual scrolling will disable the follow mode
                         // and re-enable it when we scroll to the bottom
     is_streaming: bool,  // Add this new field
+    log_scroll_shared: Arc<Mutex<usize>>,
 }
 
 impl App {
@@ -129,6 +123,7 @@ impl App {
             raw_mode: false,
             follow_mode: true,  // Start in follow mode
             is_streaming: false,  // Initialize the new field
+            log_scroll_shared: Arc::new(Mutex::new(0)),
         })
     }
 
@@ -172,7 +167,7 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Initialize logger first
-    let logger = UiLogger::new(100); // Keep last 100 log messages
+    let logger = UiLogger::new(1000); // Keep last 1000 log messages
     let log_buffer = logger.buffer.clone();
     
     // Initialize the logger only once
@@ -182,20 +177,16 @@ async fn main() -> Result<()> {
             .expect("Failed to set logger");
     });
 
-    // Create and store app state
+    // Create app state locally
     let config = Config::load()?;
-    let app = App::new(config, log_buffer.clone()).await?;
-    unsafe {
-        APP = Some(app);
-    }
+    let mut app = App::new(config, log_buffer.clone()).await?;
 
     // Main loop
     loop {
-        let mut app = unsafe { APP.as_mut().unwrap() };
-        // Check for new log messages and auto-scroll if needed
+        // Use app directly without unsafe
         let current_log_count = log_buffer.lock().unwrap().len();
         if current_log_count > app.last_log_count {
-            app.log_scroll = usize::MAX; // Auto-scroll to bottom
+            app.log_scroll = usize::MAX;
             app.last_log_count = current_log_count;
         }
 
@@ -352,12 +343,8 @@ async fn main() -> Result<()> {
                             }
                         }
                         KeyCode::Tab => {
-                            unsafe {
-                                let app = APP.as_mut().unwrap();
-                                app.is_log_focused = !app.is_log_focused;
-                            }
+                            app.is_log_focused = !app.is_log_focused;
                             if app.is_log_focused {
-                                // Auto-scroll to bottom when focusing logs
                                 app.log_scroll = usize::MAX;
                             }
                         }
@@ -420,13 +407,50 @@ fn ui(f: &mut Frame, app: &mut App) {
     // }
 
     // Calculate scroll and content metrics
-    let total_message_height = messages_to_display.len();
-    let visible_height = chunks[0].height.saturating_sub(2) as usize; // Subtract 2 for borders
+    let total_message_height = messages_to_display.iter()
+        .map(|line| {
+            let line_width = chunks[0].width.saturating_sub(2) as usize; // Subtract 2 for borders
+            let rendered_width = if app.raw_mode {
+                line.width()
+            } else {
+                // For rendered content, we need to consider the actual rendered width
+                // which might include formatting, code blocks, etc.
+                match line.spans.first() {
+                    Some(span) if span.content.starts_with("```") => {
+                        // Code blocks typically need more height
+                        (line.width() as f32 / (line_width - 2) as f32).ceil() as usize + 2
+                    }
+                    Some(span) if span.content.starts_with(">") => {
+                        // Blockquotes might wrap differently
+                        (line.width() as f32 / (line_width - 2) as f32).ceil() as usize
+                    }
+                    _ => {
+                        // Regular text
+                        (line.width() as f32 / line_width as f32).ceil() as usize
+                    }
+                }
+            };
+            rendered_width
+        })
+        .sum::<usize>();
+
+    // Add extra padding to ensure we can scroll to the very end
+    let total_message_height = total_message_height + 5; // Add some extra lines of padding
+
+    let visible_height = chunks[0].height.saturating_sub(2) as usize;
     let max_scroll = if total_message_height > visible_height {
         total_message_height - visible_height
     } else {
         0
     };
+
+    // Add debug logging
+    // if app.scroll == usize::MAX || app.scroll == max_scroll {
+    //     info!(
+    //         "Scroll metrics - Total: {}, Visible: {}, Max: {}, Current: {}",
+    //         total_message_height, visible_height, max_scroll, app.scroll
+    //     );
+    // }
 
     // Clamp scroll value to valid range
     if app.scroll == usize::MAX {
