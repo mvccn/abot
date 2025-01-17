@@ -481,7 +481,7 @@ fn ui(f: &mut Frame, app: &mut App) {
             .title("Chat")
             .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
             .border_type(BorderType::Rounded))
-        .wrap(Wrap { trim: true })
+        // .wrap(Wrap { trim: false })
         .scroll((app.scroll as u16, 0))
         .style(Style::default().fg(Color::White));
     
