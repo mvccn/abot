@@ -107,7 +107,11 @@ impl WebSearch {
         }
         .text()
         .await?;
-        let document = Html::parse_document(&response);
+        
+        // Parse HTML in a synchronous block to avoid Send issues
+        let document = tokio::task::spawn_blocking(move || {
+            Html::parse_document(&response)
+        }).await??;
         
         // Remove unwanted elements
         let selector_to_remove = Selector::parse("script, style, meta, link, noscript, iframe, svg").unwrap();
