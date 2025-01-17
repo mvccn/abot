@@ -210,11 +210,10 @@ impl ChatBot {
                 use_llama: web_search.use_llama,
             };
             
-            tokio::spawn(async move {
-                if let Err(e) = web_search.search(&query_clone).await {
-                    error!("Web search failed: {}", e);
-                }
-            });
+            // Run web search in current task instead of spawning new one
+            if let Err(e) = web_search.search(&query_clone).await {
+                error!("Web search failed: {}", e);
+            }
         }
 
         let _message = query;

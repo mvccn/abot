@@ -108,34 +108,35 @@ impl WebSearch {
         .text()
         .await?;
         
-        // Parse HTML in a synchronous block to avoid Send issues
-        // Parse HTML directly since scraper isn't thread-safe
-        let document = Html::parse_document(&response);
-        
-        // Remove unwanted elements
-        let selector_to_remove = Selector::parse("script, style, meta, link, noscript, iframe, svg").unwrap();
-        let text_selectors = Selector::parse("p, h1, h2, h3, h4, h5, h6, article, section, main, div > text").unwrap();
-        
-        // Extract meaningful text content
-        let content: String = document
-            .select(&text_selectors)
-            .map(|element| {
-                // Skip if this element or its parent is in the removal list
-                if element.select(&selector_to_remove).next().is_some() {
-                    return String::new();
-                }
-                
-                // Get text content, normalize whitespace
-                element.text()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
+        // Parse HTML in a blocking task to avoid Send issues
+        let content = tokio::task::spawn_blocking(move || {
+            let document = Html::parse_document(&response);
+            
+            // Remove unwanted elements
+            let selector_to_remove = Selector::parse("script, style, meta, link, noscript, iframe, svg").unwrap();
+            let text_selectors = Selector::parse("p, h1, h2, h3, h4, h5, h6, article, section, main, div > text").unwrap();
+            
+            // Extract meaningful text content
+            document
+                .select(&text_selectors)
+                .map(|element| {
+                    // Skip if this element or its parent is in the removal list
+                    if element.select(&selector_to_remove).next().is_some() {
+                        return String::new();
+                    }
+                    
+                    // Get text content, normalize whitespace
+                    element.text()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }).await??;
 
         // Add debug output
         #[cfg(debug_assertions)]
