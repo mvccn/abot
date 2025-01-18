@@ -28,6 +28,10 @@ mod llama;
 mod web_search;
 mod markdown;
 
+const APP_LOG_FILTER: &str = "abot=debug";  // Show debug logs for "abot" crate only
+// Alternative if you want to include specific modules:
+// const APP_LOG_FILTER: &str = "abot=debug,chatbot=debug,llama=debug";
+
 #[derive(Clone)]
 struct UiLogger {
     buffer: Arc<Mutex<Vec<String>>>,
@@ -127,31 +131,6 @@ impl App {
         })
     }
 
-    fn handle_input(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::PageUp | KeyCode::Up => {
-                if !self.is_log_focused {
-                    self.scroll = self.scroll.saturating_sub(if key.code == KeyCode::PageUp { 10 } else { 1 });
-                    // Disable follow mode when manually scrolling up
-                    self.follow_mode = false;
-                }
-            }
-            KeyCode::PageDown | KeyCode::Down => {
-                if !self.is_log_focused {
-                    self.scroll = self.scroll.saturating_add(if key.code == KeyCode::PageDown { 10 } else { 1 });
-                    // Re-enable follow mode if we scroll to bottom
-                    if self.is_at_bottom(self.scroll) {
-                        self.follow_mode = true;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn is_at_bottom(&self, max_scroll: usize) -> bool {
-        self.scroll >= max_scroll.saturating_sub(1)
-    }
 }
 
 static INIT: Once = Once::new();
@@ -173,7 +152,7 @@ async fn main() -> Result<()> {
     // Initialize the logger only once
     INIT.call_once(|| {
         log::set_boxed_logger(Box::new(logger.clone()))
-            .map(|()| log::set_max_level(LevelFilter::Debug))
+            .map(|()| log::set_max_level(LevelFilter::from_str(APP_LOG_FILTER).unwrap_or(LevelFilter::Info)))
             .expect("Failed to set logger");
     });
 
@@ -270,7 +249,7 @@ async fn main() -> Result<()> {
                                     app.chatbot.add_message("user", &input);
                                     // Force a redraw to show the user message
                                     terminal.draw(|f| ui(f, &mut app))?;
-                                    match app.chatbot.querry(&input).await {
+                                    match app.chatbot.query(&input).await {
                                         Ok(mut stream) => {
                                             app.chatbot.add_message("assistant", "");
                                             app.current_response.clear();
@@ -473,7 +452,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     };
 
     // Calculate available width for text (accounting for borders and padding)
-    let text_width = msg_area.width.saturating_sub(2); // 1 char padding on each side
+    // let text_width = msg_area.width.saturating_sub(2); // 1 char padding on each side
     
     // Render messages with exact formatting
     let messages = Paragraph::new(messages_to_display.clone())
@@ -485,11 +464,8 @@ fn ui(f: &mut Frame, app: &mut App) {
         .scroll((app.scroll as u16, 0))
         .style(Style::default().fg(Color::White));
     
-    // Use a custom render method to handle wrapping properly
-    f.render_widget(messages, msg_area.inner(&Margin {
-        horizontal: 1,
-        vertical: 0,
-    }));
+    // Remove the inner margin when rendering the messages
+    f.render_widget(messages, msg_area);
 
     // Update scrollbar to reflect current position
     let scrollbar = Scrollbar::default()
@@ -558,7 +534,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .block(Block::default()
             .title("Logs")
             .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
-            .border_set(collapsed_set)
+            .border_type(BorderType::Plain)
             .style(if app.is_log_focused {
                 Style::default().fg(Color::Yellow)
             } else {

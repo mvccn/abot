@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::stream;
 use futures::{Stream, StreamExt};
-use log::{debug, error};
+use log::{debug, error, info};
 use anyhow::Context;
 use serde_json::Value;
 use std::fs;
@@ -13,7 +13,7 @@ use bytes::Bytes;
 use crate::config::Config;
 use ratatui::prelude::Line;
 use crate::markdown;
-
+use crate::web_search::SearchResult;
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub role: String,
@@ -110,7 +110,7 @@ impl ChatMessage {
 //     }
 // }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ChatBot {
     pub messages: Vec<ChatMessage>,
     config: Config,
@@ -118,6 +118,7 @@ pub struct ChatBot {
     llama_client: llama::LlamaClient,
     web_search: WebSearch,
     conversation_id: String,
+    search_results_rx: Option<tokio::sync::mpsc::Receiver<Result<Vec<SearchResult>>>>,
 }
 
 type MessageStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
@@ -155,6 +156,7 @@ impl ChatBot {
             config: config.clone(),
             web_search,
             conversation_id,
+            search_results_rx: None,
         };
 
         let initial_prompt = bot.config.default.initial_prompt.clone();
@@ -184,49 +186,89 @@ impl ChatBot {
             .collect()
     }
 
-    pub async fn querry(&mut self, message: &str) -> Result<MessageStream> {
+    pub async fn query(&mut self, message: &str) -> Result<MessageStream> {
         let is_web_search = message.contains("@web");
-        let query = message
+        let query_text = message
             .split_whitespace()
             .filter(|word| !word.starts_with('#') && !word.starts_with('@'))
             .collect::<Vec<_>>()
             .join(" ");
 
-        // If it's a web search, spawn a background task
         if is_web_search {
-            debug!("Performing web search for query: '{}'", query);
-            let web_search = self.web_search.clone();
-            let query_clone = query.clone();
+            info!("🔍 Web search initiated for: '{}'", query_text);
             
-            // Spawn the web search in a background task
-            // Create a new WebSearch instance for the background task
-            let mut web_search = WebSearch {
-                client: web_search.client.clone(),
-                cache_dir: web_search.cache_dir.clone(),
-                conversation_id: web_search.conversation_id.clone(),
-                max_results: web_search.max_results,
-                llama: web_search.llama.clone(),
-                query: String::new(),
-                use_llama: web_search.use_llama,
-            };
-            
-            // Run web search in current task instead of spawning new one
-            if let Err(e) = web_search.search(&query_clone).await {
-                error!("Web search failed: {}", e);
+            // Clear existing results
+            {
+                let mut results = self.web_search.results.write().await;
+                results.clear();
             }
+            
+            // Create channel for receiving search results
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            self.search_results_rx = Some(rx);
+            
+            // Spawn background search task
+            let mut web_search = self.web_search.clone();
+            let query = query_text.clone();
+            
+            tokio::spawn(async move {
+                debug!("Background search task started for query: '{}'", query);
+                match web_search.research(&query).await {
+                    Ok(results) => {
+                        if let Err(e) = tx.send(Ok(results.read().await.clone())).await {
+                            error!("Failed to send search results: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        if let Err(send_err) = tx.send(Err(e)).await {
+                            error!("Failed to send error: {}", send_err);
+                        }
+                    }
+                }
+            });
+
+            // Wait for search results with timeout
+            match tokio::time::timeout(std::time::Duration::from_secs(10), self.search_results_rx.as_mut().unwrap().recv()).await {
+                Ok(Some(Ok(results))) => {
+                    info!("📚 Retrieved {} search results", results.len());
+                    let context = results.iter()
+                        .enumerate()
+                        .map(|(i, result)| {
+                            format!(
+                                "Source {}: {}\nSummary: {}", 
+                                i + 1, 
+                                result.url,
+                                result.summary
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
+                    
+                    self.add_message("system", &format!(
+                        "Here are relevant search results for your query:\n\n{}", 
+                        context
+                    ));
+                }
+                Ok(Some(Err(e))) => {
+                    error!("❌ Web search failed: {}", e);
+                    self.add_message("system", "Sorry, the web search failed. I'll try to help with my existing knowledge.");
+                }
+                Ok(None) => {
+                    error!("Search results channel closed unexpectedly");
+                    self.add_message("system", "The web search was interrupted. I'll try to help with my existing knowledge.");
+                }
+                Err(_) => {
+                    error!("Web search timed out");
+                    self.add_message("system", "The web search took too long. I'll try to help with my existing knowledge.");
+                }
+            }
+            
+            self.search_results_rx = None;
         }
 
-        let _message = query;
-
-        debug!("Sending request to provider: {} at {}", self.current_provider, self.llama_client.config.api_url);
-
-        let response = match self.llama_client.generate(&self.get_raw_messages()).await {
-            Ok(resp) => resp,
-            Err(e) => {
-                error!("Failed to generate response from provider {}: {}", self.current_provider, e);
-                return Err(e).context("Failed to generate response from LLM provider");
-            }
-        };
+        // Generate response using LLama
+        info!("Generating response using context from {} messages", self.messages.len());
+        let response = self.llama_client.generate(&self.get_raw_messages()).await?;
 
         if self.config.default.stream {
             let stream = response.bytes_stream().map(|chunk_result| {
