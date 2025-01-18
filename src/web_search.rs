@@ -197,7 +197,7 @@ impl WebSearch {
                         let content = fetch_url(&client, &url, &cache_dir).await?;
                         info!("🏄 Got content {} chars for URL: {}", content.len(), url);
                         let summary = summarize_content(&llama, use_llama, &content, &query).await;
-                        info!("�� Summarized content for URL: {}", summary);
+                        info!("💾 Summarized content for query: {}, result: {}", query , summary);
                         
                         // Cache the result
                         let cached_doc = cache_result(&cache_dir, &url, &snippet, Some(content), Some(summary)).await?;

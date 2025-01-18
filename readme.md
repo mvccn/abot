@@ -57,10 +57,12 @@ up/down or page up/down to navigate the conversation.
 tab to logs section.
 
 ### commands: 
-/model modelname: to switch model, default is deepseek, you can use other model like gpt-4o, claude-3-5-sonnet-20240620. 
-    you will need to have them configured in your ~/.config/abot/config.toml file.
-    switch to the model by /model modelname, where modelname is the name of the model configuration in the config.toml file.
-/log debug|info: set log level to debug or info
-/save: save last conversation
-/saveall: save all the conversation
-/exit: exit the app
+- /model modelname: to switch model, default is deepseek, you can use other model like gpt-4o, claude-3-5-sonnet-20240620. 
+    - you will need to have them configured in your ~/.config/abot/config.toml file.
+    - switch to the model by /model modelname, where modelname is the name of the model configuration in the config.toml file.
+- /log debug|info: set log level to debug or info
+- /save: save last conversation
+- /saveall: save all the conversation
+- /raw: show raw output
+- /exit: exit the app
+- @web: search web by add @web in your message
