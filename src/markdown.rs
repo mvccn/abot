@@ -10,6 +10,7 @@ use syntect::{
 };
 use std::collections::HashMap;
 use log::debug;
+use std::convert::TryInto;
 
 lazy_static::lazy_static! {
     static ref LANGUAGE_ALIASES: HashMap<&'static str, &'static str> = {
@@ -102,6 +103,7 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
     let mut code_block = false;
     let mut current_language = String::new();
     let mut list_level = 0;
+    let mut list_start_numbers: Vec<usize> = Vec::new(); // Track start numbers for each list level
 
     for event in parser {
         match event {
@@ -158,20 +160,18 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                     }
                     list_level += 1;
-                    
-                    // Store the list start number if it's an ordered list
-                    if let Some(start_num) = start {
-                        current_spans.push(Span::raw("  ".repeat(list_level - 1)));
-                        current_spans.push(Span::styled(format!("{}. ", start_num), current_style));
-                    }
+                    list_start_numbers.push(start.unwrap_or(1).try_into().unwrap()); // Convert u64 to usize
                 }
                 Tag::Item => {
                     if list_level > 0 {
                         let indent = "  ".repeat(list_level - 1);
+                        current_spans.push(Span::raw(indent));
                         
-                        // Only add bullet if we're not in an ordered list
-                        if current_spans.is_empty() || !current_spans.last().unwrap().content.ends_with(". ") {
-                            current_spans.push(Span::raw(indent));
+                        // Add bullet or number for ordered list
+                        if let Some(start_num) = list_start_numbers.last_mut() {
+                            current_spans.push(Span::styled(format!("{}. ", *start_num), current_style));
+                            *start_num += 1; // Increment for the next item
+                        } else {
                             current_spans.push(Span::styled("• ", current_style));
                         }
                     }
@@ -198,13 +198,17 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     }
                     lines.push(Line::from(Vec::new()));
                 }
+                Tag::Item => {
+                    if !current_spans.is_empty() {
+                        lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
+                    }
+                }
                 Tag::List(_) => {
                     if !current_spans.is_empty() {
                         lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                     }
                     list_level = list_level.saturating_sub(1);
-                    // Add an empty line after lists for better spacing
-                    lines.push(Line::from(Vec::new()));
+                    list_start_numbers.pop(); // Remove the start number for the current list level
                 }
                 _ => {}
             },

@@ -1,36 +1,36 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyEvent},
+    event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use log::{LevelFilter, Log, Metadata, Record, info, error};
-use std::any::Any;
+use log::{debug, error, info, LevelFilter, Log, Metadata, Record};
 use ratatui::{
     prelude::*,
     style::Style,
     widgets::{
-        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
-        BorderType,
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
     },
     Terminal,
 };
+use std::any::Any;
 use std::io::stdout;
-use std::sync::{Arc, Mutex, Once};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex, Once};
 
 mod chatbot;
 mod config;
 use chatbot::ChatBot;
 use config::Config;
 mod llama;
-mod web_search;
 mod markdown;
+mod web_search;
 
-const APP_LOG_FILTER: &str = "abot=debug";  // Show debug logs for "abot" crate only
-// Alternative if you want to include specific modules:
-// const APP_LOG_FILTER: &str = "abot=debug,chatbot=debug,llama=debug";
+const APP_LOG_FILTER: &str = "abot=debug"; // Show debug logs for "abot" crate only
+                                           // Alternative if you want to include specific modules:
+                                           // const APP_LOG_FILTER: &str = "abot=debug,chatbot=debug,llama=debug";
 
 #[derive(Clone)]
 struct UiLogger {
@@ -89,55 +89,51 @@ impl Log for UiLogger {
 struct App {
     chatbot: ChatBot,
     input: String,
-    // messages: Vec<String>,
-    scroll: usize,          // This will now represent the line number we're scrolled to
+    scroll: usize, // This will now represent the line number we're scrolled to
+    log_scroll: usize, // Add this new field for log scrolling
     current_response: String,
     info_message: String,
     log_buffer: Arc<Mutex<Vec<String>>>,
     visible_height: u16,
-    log_scroll: usize,
     is_log_focused: bool,
-    last_log_count: usize,  // Track number of log lines to detect new messages
-    last_message_count: usize,  // Add this new field to track message count
-    raw_mode: bool,         // Whether to show raw content instead of rendered markdown
-    follow_mode: bool,  // follow mode scrolling: auto scroll to bottom when new content is added,
-                        // but manual scrolling will disable the follow mode
-                        // and re-enable it when we scroll to the bottom
-    is_streaming: bool,  // Add this new field
+    last_log_count: usize, // Track number of log lines to detect new messages
+    last_message_count: usize, // Add this new field to track message count
+    raw_mode: bool,        // Whether to show raw content instead of rendered markdown
+    follow_mode: bool, // follow mode scrolling: auto scroll to bottom when new content is added,
+    // but manual scrolling will disable the follow mode
+    // and re-enable it when we scroll to the bottom
+    is_streaming: bool, // Add this new field
     log_scroll_shared: Arc<Mutex<usize>>,
 }
 
 impl App {
     async fn new(config: Config, log_buffer: Arc<Mutex<Vec<String>>>) -> Result<Self> {
         let chatbot = ChatBot::new(config).await?;
-        
+
         Ok(Self {
             chatbot,
             input: String::new(),
-            // messages: Vec::new(),
             scroll: 0,
+            log_scroll: 0, // Initialize the new field
             current_response: String::new(),
             info_message: String::new(),
             log_buffer,
             visible_height: 0,
-            log_scroll: 0,
             is_log_focused: false,
             last_log_count: 0,
             last_message_count: 0,
             raw_mode: false,
-            follow_mode: true,  // Start in follow mode
-            is_streaming: false,  // Initialize the new field
+            follow_mode: true,   // Start in follow mode
+            is_streaming: false, // Initialize the new field
             log_scroll_shared: Arc::new(Mutex::new(0)),
         })
     }
-
 }
 
 static INIT: Once = Once::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {
-
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -148,11 +144,15 @@ async fn main() -> Result<()> {
     // Initialize logger first
     let logger = UiLogger::new(1000); // Keep last 1000 log messages
     let log_buffer = logger.buffer.clone();
-    
+
     // Initialize the logger only once
     INIT.call_once(|| {
         log::set_boxed_logger(Box::new(logger.clone()))
-            .map(|()| log::set_max_level(LevelFilter::from_str(APP_LOG_FILTER).unwrap_or(LevelFilter::Info)))
+            .map(|()| {
+                log::set_max_level(
+                    LevelFilter::from_str(APP_LOG_FILTER).unwrap_or(LevelFilter::Info),
+                )
+            })
             .expect("Failed to set logger");
     });
 
@@ -163,18 +163,18 @@ async fn main() -> Result<()> {
     // Main loop
     loop {
         // Use app directly without unsafe
-        let current_log_count = log_buffer.lock().unwrap().len();
-        if current_log_count > app.last_log_count {
-            app.log_scroll = usize::MAX;
-            app.last_log_count = current_log_count;
-        }
+        // let current_log_count = log_buffer.lock().unwrap().len();
+        // if current_log_count > app.last_log_count {
+        //     app.log_scroll = usize::MAX;
+        //     app.last_log_count = current_log_count;
+        // }
 
-        // Check for new messages and auto-scroll if needed
-        let current_message_count = app.chatbot.messages.len();
-        if current_message_count > app.last_message_count {
-            app.scroll = usize::MAX; // Auto-scroll to bottom
-            app.last_message_count = current_message_count;
-        }
+        // // Check for new messages and auto-scroll if needed
+        // let current_message_count = app.chatbot.messages.len();
+        // if current_message_count > app.last_message_count {
+        //     app.scroll = usize::MAX; // Auto-scroll to bottom
+        //     app.last_message_count = current_message_count;
+        // }
 
         terminal.draw(|f| ui(f, &mut app))?;
 
@@ -197,7 +197,6 @@ async fn main() -> Result<()> {
                                         "save" => {
                                             if let Err(e) = app.chatbot.save_last_interaction() {
                                                 error!("Error saving last interaction: {}", e);
-                     
                                             }
                                         }
                                         //add /quit or /exit to quit the app
@@ -208,28 +207,40 @@ async fn main() -> Result<()> {
                                         "log" => {
                                             if command.len() > 1 {
                                                 let logging_level = command[1];
-                                                if let Ok(level) = LevelFilter::from_str(logging_level) {
+                                                if let Ok(level) =
+                                                    LevelFilter::from_str(logging_level)
+                                                {
                                                     log::set_max_level(level);
-                                                    info!("Logging level set to: {}", logging_level);
+                                                    info!(
+                                                        "Logging level set to: {}",
+                                                        logging_level
+                                                    );
                                                 } else {
-                                                    error!("Invalid logging level: {}", logging_level);
+                                                    error!(
+                                                        "Invalid logging level: {}",
+                                                        logging_level
+                                                    );
                                                 }
                                             }
                                         }
                                         "saveall" => {
                                             if let Err(e) = app.chatbot.save_all_history() {
                                                 error!("Error saving all history: {}", e);
-                  
                                             }
                                         }
                                         "model" => {
                                             if command.len() > 1 {
                                                 let provider = command[1];
                                                 if let Err(e) = app.chatbot.set_provider(provider) {
-                                                    error!("Failed to switch to provider '{}': {}", provider, e);
-                               
+                                                    error!(
+                                                        "Failed to switch to provider '{}': {}",
+                                                        provider, e
+                                                    );
                                                 } else {
-                                                   info!("Successfully switched to provider: {}", provider);
+                                                    info!(
+                                                        "Successfully switched to provider: {}",
+                                                        provider
+                                                    );
                                                 }
                                             } else {
                                                 error!("Usage: /model <provider>");
@@ -237,7 +248,10 @@ async fn main() -> Result<()> {
                                         }
                                         "raw" => {
                                             app.raw_mode = !app.raw_mode;
-                                            app.info_message = format!("Raw mode {}", if app.raw_mode { "enabled" } else { "disabled" });
+                                            app.info_message = format!(
+                                                "Raw mode {}",
+                                                if app.raw_mode { "enabled" } else { "disabled" }
+                                            );
                                         }
                                         _ => {
                                             error!("Unknown command: {}", input);
@@ -255,19 +269,21 @@ async fn main() -> Result<()> {
                                             app.current_response.clear();
                                             app.is_streaming = true;
                                             terminal.hide_cursor()?;
-                                            
+
                                             while let Some(chunk_result) = stream.next().await {
                                                 match chunk_result {
                                                     Ok(content) => {
                                                         if !content.is_empty() {
                                                             app.current_response.push_str(&content);
-                                                            app.chatbot.update_last_message(&app.current_response);
-                                                            
+                                                            app.chatbot.update_last_message(
+                                                                &app.current_response,
+                                                            );
+
                                                             // Only auto-scroll if in follow mode
                                                             if app.follow_mode {
                                                                 app.scroll = usize::MAX;
                                                             }
-                                                            
+
                                                             terminal.draw(|f| ui(f, &mut app))?;
                                                         }
                                                     }
@@ -277,7 +293,7 @@ async fn main() -> Result<()> {
                                                     }
                                                 }
                                             }
-                                            
+
                                             app.is_streaming = false;
                                             terminal.show_cursor()?;
                                             app.current_response.clear();
@@ -311,14 +327,27 @@ async fn main() -> Result<()> {
                         }
                         KeyCode::PageUp => {
                             if !app.is_log_focused {
-                                // Scroll up by a larger amount (e.g., 10 lines)
+                                // Scroll up by the visible height of the chat area
+                                // let scroll_amount = app.visible_height as usize;
+                                debug!(
+                                    "Scroll up by 10, scroll: {}, visible_height: {}",
+                                    app.scroll, app.visible_height
+                                );
                                 app.scroll = app.scroll.saturating_sub(10);
+                                // Disable follow mode when manually scrolling up
+                                app.follow_mode = false;
                             }
                         }
                         KeyCode::PageDown => {
                             if !app.is_log_focused {
-                                // Scroll down by a larger amount
-                                app.scroll = app.scroll.saturating_add(10);
+                                let scroll_amount = app.visible_height as usize;
+                                let old_scroll = app.scroll;
+                                app.scroll = app.scroll.saturating_add(scroll_amount);
+                                debug!("Scroll down by 10, scroll:{}", app.scroll);
+                                // if app.scroll >= max_scroll {
+                                //     app.scroll = max_scroll;
+                                //     app.follow_mode = true;
+                                // }
                             }
                         }
                         KeyCode::Tab => {
@@ -350,16 +379,16 @@ fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),     // Messages area
-            Constraint::Ratio(3, 10),   // Log area (30% of screen height)
-            Constraint::Length(3),   // Input area
-            Constraint::Length(1),   // Status bar
+            Constraint::Min(1),       // Messages area
+            Constraint::Ratio(3, 10), // Log area (30% of screen height)
+            Constraint::Length(3),    // Input area
+            Constraint::Length(1),    // Status bar
         ])
         .split(f.size());
 
     // Get all chatbot messages to render
-    let mut messages_to_display = Vec::new();
-    
+    let mut messages_buffer = Vec::new();
+
     // Add all completed messages
     for message in &app.chatbot.messages {
         // Add role prefix
@@ -368,53 +397,43 @@ fn ui(f: &mut Frame, app: &mut App) {
             "user" => Span::styled("User: ", Style::default().fg(Color::Blue)),
             _ => Span::raw("System: "),
         };
-        messages_to_display.push(Line::from(vec![prefix]));
-        
+        messages_buffer.push(Line::from(vec![prefix]));
+
         // Show raw content if raw mode is enabled
         if app.raw_mode {
-            messages_to_display.push(Line::from(message.raw_content.as_str()));
+            messages_buffer.push(Line::from(message.raw_content.as_str()));
         } else if message.role == "assistant" {
-            messages_to_display.extend(message.rendered_content.clone());
+            messages_buffer.extend(message.rendered_content.clone());
         } else {
-            messages_to_display.push(Line::from(message.raw_content.as_str()));
+            messages_buffer.push(Line::from(message.raw_content.as_str()));
         }
     }
-    
+    // debug!(
+    //     "messages: {}",
+    //     app.chatbot.messages
+    //         .iter()
+    //         .map(|msg| format!("[{}]: {}", msg.role, msg.raw_content))
+    //         .collect::<Vec<_>>()
+    //         .join("\n")
+    // );
+
+    let visible_width = chunks[0].width.saturating_sub(2) as usize;
     // If there's a current response being streamed, update the last message
     // if !app.current_response.is_empty() {
     //     app.chatbot.update_last_message(&app.current_response);
     // }
 
     // Calculate scroll and content metrics
-    let total_message_height = messages_to_display.iter()
-        .map(|line| {
-            let line_width = chunks[0].width.saturating_sub(2) as usize; // Subtract 2 for borders
-            let rendered_width = if app.raw_mode {
-                line.width()
-            } else {
-                // For rendered content, we need to consider the actual rendered width
-                // which might include formatting, code blocks, etc.
-                match line.spans.first() {
-                    Some(span) if span.content.starts_with("```") => {
-                        // Code blocks typically need more height
-                        (line.width() as f32 / (line_width - 2) as f32).ceil() as usize + 2
-                    }
-                    Some(span) if span.content.starts_with(">") => {
-                        // Blockquotes might wrap differently
-                        (line.width() as f32 / (line_width - 2) as f32).ceil() as usize
-                    }
-                    _ => {
-                        // Regular text
-                        (line.width() as f32 / line_width as f32).ceil() as usize
-                    }
-                }
-            };
-            rendered_width
+    let total_message_height = app.chatbot.messages
+        .iter()
+        .map(|message| {
+            message.raw_content.lines().map(|line| {
+                (line.len() as f32 / visible_width as f32).ceil() as usize
+            }).sum::<usize>()
         })
-        .sum::<usize>();
+        .sum::<usize>() + 5;
 
-    // Add extra padding to ensure we can scroll to the very end
-    let total_message_height = total_message_height + 5; // Add some extra lines of padding
+    debug!("total_message_height: {}", total_message_height);
 
     let visible_height = chunks[0].height.saturating_sub(2) as usize;
     let max_scroll = if total_message_height > visible_height {
@@ -443,27 +462,26 @@ fn ui(f: &mut Frame, app: &mut App) {
     let (msg_area, scrollbar_area) = {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(message_area);
         (chunks[0], chunks[1])
     };
 
     // Calculate available width for text (accounting for borders and padding)
     // let text_width = msg_area.width.saturating_sub(2); // 1 char padding on each side
-    
+
     // Render messages with exact formatting
-    let messages = Paragraph::new(messages_to_display.clone())
-        .block(Block::default()
-            .title("Chat")
-            .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
-            .border_type(BorderType::Rounded))
+    let messages = Paragraph::new(messages_buffer.clone())
+        .block(
+            Block::default()
+                .title("Chat")
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
+                .border_type(BorderType::Rounded),
+        )
         .wrap(Wrap { trim: false })
         .scroll((app.scroll as u16, 0))
         .style(Style::default().fg(Color::White));
-    
+
     // Remove the inner margin when rendering the messages
     f.render_widget(messages, msg_area);
 
@@ -476,8 +494,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     f.render_stateful_widget(
         scrollbar,
         scrollbar_area,
-        &mut ScrollbarState::new(total_message_height as usize)
-            .position(app.scroll),
+        &mut ScrollbarState::new(total_message_height as usize).position(app.scroll),
     );
 
     // Log area with scrollbar
@@ -487,7 +504,6 @@ fn ui(f: &mut Frame, app: &mut App) {
         String::from("Unable to access log buffer")
     };
 
-    // Calculate log scroll metrics
     let log_lines: Vec<&str> = log_content.lines().collect();
     let log_height = chunks[1].height.saturating_sub(2) as usize;
     let max_log_scroll = if log_lines.len() > log_height {
@@ -495,10 +511,15 @@ fn ui(f: &mut Frame, app: &mut App) {
     } else {
         0
     };
-    
-    // Clamp log scroll value
+
+    // Ensure log_scroll is set to show the latest logs
+    if app.log_scroll == usize::MAX {
+        app.log_scroll = max_log_scroll;
+    }
+
+    // Clamp log scroll value to valid range
     app.log_scroll = app.log_scroll.min(max_log_scroll);
-    
+
     // Get visible log lines
     let visible_logs = log_lines
         .iter()
@@ -507,7 +528,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .map(|line| Line::from(*line))
         .collect::<Vec<_>>();
 
-    let collapsed_set = symbols::border::Set {
+    let _collapsed_set = symbols::border::Set {
         top_left: symbols::line::NORMAL.vertical_right,
         top_right: symbols::line::NORMAL.vertical_left,
         ..symbols::border::PLAIN
@@ -522,24 +543,23 @@ fn ui(f: &mut Frame, app: &mut App) {
     let (log_area, log_scrollbar_area) = {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(chunks[1]);
         (chunks[0], chunks[1])
     };
 
     let logs = Paragraph::new(visible_logs)
-        .block(Block::default()
-            .title("Logs")
-            .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
-            .border_type(BorderType::Plain)
-            .style(if app.is_log_focused {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().add_modifier(Modifier::DIM)
-            }))
+        .block(
+            Block::default()
+                .title("Logs")
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
+                .border_type(BorderType::Plain)
+                .style(if app.is_log_focused {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().add_modifier(Modifier::DIM)
+                }),
+        )
         .wrap(Wrap { trim: true })
         .scroll((0, 0));
     f.render_widget(logs, log_area);
@@ -553,16 +573,17 @@ fn ui(f: &mut Frame, app: &mut App) {
     f.render_stateful_widget(
         log_scrollbar,
         log_scrollbar_area,
-        &mut ScrollbarState::new(log_lines.len())
-            .position(app.log_scroll),
+        &mut ScrollbarState::new(log_lines.len()).position(app.log_scroll),
     );
 
     // Input area with modified borders
     let input = Paragraph::new(app.input.as_str())
-        .block(Block::default()
-            .title("Input")
-            .borders(Borders::ALL)
-            .border_set(collapsed_set_input))  // Apply custom border set
+        .block(
+            Block::default()
+                .title("Input")
+                .borders(Borders::ALL)
+                .border_set(collapsed_set_input),
+        ) // Apply custom border set
         .wrap(Wrap { trim: true });
     f.render_widget(input, chunks[2]);
 
@@ -573,7 +594,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     );
     let status_bar = Paragraph::new(status_text)
         .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().add_modifier(Modifier::DIM));  // Makes the text appear less prominent
+        .style(Style::default().add_modifier(Modifier::DIM)); // Makes the text appear less prominent
     f.render_widget(status_bar, chunks[3]);
 
     // Only set cursor position if not streaming
