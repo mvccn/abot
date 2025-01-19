@@ -7,15 +7,15 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use crate::config::{Config, ModelConfig};
-use log::{debug, warn, error, info};
+use log::{debug, error, info};
 
 #[derive(Debug, Error)]
 pub enum LlamaError {
     #[error("Service is not available: {0}")]
     ServiceUnavailable(String),
     
-    #[error("Model '{0}' is not available: {1}")]
-    ModelNotAvailable(String, String),
+    // #[error("Model '{0}' is not available: {1}")]
+    // ModelNotAvailable(String, String),
     
     #[error("Request failed: {0}")]
     RequestFailed(String),
@@ -33,35 +33,35 @@ pub struct Message {
     pub content: String,
 }
 
-#[derive(Debug, Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<Message>,
-    stream: bool,
-    temperature: f32,
-    max_tokens: Option<u32>,
-}
+// #[derive(Debug, Serialize)]
+// struct ChatRequest {
+//     model: String,
+//     messages: Vec<Message>,
+//     stream: bool,
+//     temperature: f32,
+//     max_tokens: Option<u32>,
+// }
 
-#[derive(Debug, Deserialize)]
-struct CompletionResponse {
-    #[serde(default)]
-    response: String,          // For Ollama
-    #[serde(default)]
-    choices: Vec<Choice>,      // For OpenAI/Deepseek
-}
+// #[derive(Debug, Deserialize)]
+// struct CompletionResponse {
+//     #[serde(default)]
+//     response: String,          // For Ollama
+//     #[serde(default)]
+//     choices: Vec<Choice>,      // For OpenAI/Deepseek
+// }
 
-#[derive(Debug, Deserialize)]
-struct Choice {
-    #[serde(default)]
-    message: Option<Message>,
-    #[serde(default)]
-    delta: Option<Message>,
-}
+// #[derive(Debug, Deserialize)]
+// struct Choice {
+//     #[serde(default)]
+//     message: Option<Message>,
+//     #[serde(default)]
+//     delta: Option<Message>,
+// }
 
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: String,
-}
+// #[derive(Debug, Deserialize)]
+// struct ErrorResponse {
+//     error: String,
+// }
 
 #[derive(Debug, Clone)]
 pub struct LlamaClient {
@@ -262,28 +262,28 @@ impl LlamaClient {
         Self::new(model_config)
     }
 
-    pub async fn test_availability(&self) -> Result<bool> {
-        let test_message = vec![Message {
-            role: "user".to_string(),
-            content: "test".to_string(),
-        }];
+    // pub async fn test_availability(&self) -> Result<bool> {
+    //     let test_message = vec![Message {
+    //         role: "user".to_string(),
+    //         content: "test".to_string(),
+    //     }];
 
-        match self.generate(&test_message).await {
-            Ok(response) => {
-                // Check if the response status is successful
-                if response.status().is_success() {
-                    Ok(true)
-                } else {
-                    warn!("LLM service returned unsuccessful status: {}", response.status());
-                    Ok(false)
-                }
-            },
-            Err(e) => {
-                warn!("Failed to connect to LLM service: {}", e);
-                Ok(false)
-            }
-        }
-    }
+    //     match self.generate(&test_message).await {
+    //         Ok(response) => {
+    //             // Check if the response status is successful
+    //             if response.status().is_success() {
+    //                 Ok(true)
+    //             } else {
+    //                 warn!("LLM service returned unsuccessful status: {}", response.status());
+    //                 Ok(false)
+    //             }
+    //         },
+    //         Err(e) => {
+    //             warn!("Failed to connect to LLM service: {}", e);
+    //             Ok(false)
+    //         }
+    //     }
+    // }
 }
 
 #[cfg(test)]

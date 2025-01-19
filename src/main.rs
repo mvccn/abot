@@ -15,7 +15,6 @@ use ratatui::{
     },
     Terminal,
 };
-use std::any::Any;
 use std::io::stdout;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, Once};
@@ -46,12 +45,6 @@ impl UiLogger {
             max_lines,
             log_scroll: Arc::new(Mutex::new(0)),
         }
-    }
-}
-
-impl UiLogger {
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
@@ -96,14 +89,11 @@ struct App {
     log_buffer: Arc<Mutex<Vec<String>>>,
     visible_height: u16,
     is_log_focused: bool,
-    last_log_count: usize, // Track number of log lines to detect new messages
-    last_message_count: usize, // Add this new field to track message count
     raw_mode: bool,        // Whether to show raw content instead of rendered markdown
     follow_mode: bool, // follow mode scrolling: auto scroll to bottom when new content is added,
     // but manual scrolling will disable the follow mode
     // and re-enable it when we scroll to the bottom
     is_streaming: bool, // Add this new field
-    log_scroll_shared: Arc<Mutex<usize>>,
 }
 
 impl App {
@@ -120,12 +110,9 @@ impl App {
             log_buffer,
             visible_height: 0,
             is_log_focused: false,
-            last_log_count: 0,
-            last_message_count: 0,
             raw_mode: false,
             follow_mode: true,   // Start in follow mode
             is_streaming: false, // Initialize the new field
-            log_scroll_shared: Arc::new(Mutex::new(0)),
         })
     }
 }
@@ -358,7 +345,6 @@ async fn main() -> Result<()> {
                         KeyCode::PageDown => {
                             if !app.is_log_focused {
                                 let scroll_amount = app.visible_height as usize;
-                                let old_scroll = app.scroll;
                                 app.scroll = app.scroll.saturating_add(scroll_amount);
                                 debug!("Scroll down by 10, scroll:{}", app.scroll);
                                 // if app.scroll >= max_scroll {

@@ -33,7 +33,7 @@ pub struct CachedDocument {
 pub struct WebSearch {
     pub client: Client,
     pub cache_dir: PathBuf,
-    pub conversation_id: String,
+    // pub conversation_id: String,
     pub max_results: usize,
     pub llama: LlamaClient,
     pub query: String,
@@ -80,7 +80,7 @@ impl WebSearch {
         Ok(Self {
             client: Client::new(),
             cache_dir,
-            conversation_id: conversation_id.to_string(),
+            // conversation_id: conversation_id.to_string(),
             max_results,
             llama,
             query: String::new(),

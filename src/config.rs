@@ -84,19 +84,6 @@ pub struct ModelConfig {
     pub stream: Option<bool>,
 }
 
-impl ModelConfig {
-    pub fn get_temperature(&self, defaults: &DefaultConfig) -> f32 {
-        self.temperature.unwrap_or(defaults.temperature)
-    }
-
-    pub fn get_max_tokens(&self, defaults: &DefaultConfig) -> u32 {
-        self.max_tokens.unwrap_or(defaults.max_tokens)
-    }
-
-    pub fn get_stream(&self, defaults: &DefaultConfig) -> bool {
-        self.stream.unwrap_or(defaults.stream)
-    }
-}
 
 impl Default for ModelConfig {
     fn default() -> Self {
