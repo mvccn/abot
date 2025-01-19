@@ -1,0 +1,9 @@
+<json> ::= <node_list>
+<node_list> ::= "[" <node> ("," <node>)* "]"
+<node> ::= "{" <node_name> "," <node_info> "}"
+<node_name> ::= "\"name\": \"" <string> "\""
+<node_info> ::= "\"info\": \"" <string> "\""
+<string> ::= <character>*
+<character> ::= <letter> | <digit> | " " | "," | "." | "-" | "_"
+<letter> ::= "a" | "b" | "c" | ... | "z" | "A" | "B" | ... | "Z"
+<digit> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"

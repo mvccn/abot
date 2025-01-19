@@ -36,7 +36,7 @@ impl Default for Config {
                 stream: true,
                 initial_prompt: String::from("You are a helpful AI assistant."),
             },
-            default_provider: String::from("llamacpp"),
+            default_provider: String::from("deepseek"),
             deepseek: ModelConfig {
                 api_url: String::from("https://api.deepseek.com/v1/chat/completions"),
                 api_key: Some(String::from("your-deepseek-key")),

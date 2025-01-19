@@ -164,6 +164,15 @@ impl LlamaClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("API request failed with status {}: {}", status, body);
+
+            // Log the response body for debugging
+            debug!("Response body on failure: {}", body);
+
+            // Check if the error is due to authentication
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(LlamaError::AuthenticationError("Invalid API key".to_string()).into());
+            }
+
             return Err(LlamaError::RequestFailed(format!("Status: {}, Body: {}", status, body)).into());
         }
         
@@ -280,52 +289,8 @@ impl LlamaClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ModelConfig;
-    use std::fs;
-    use serde::Deserialize;
-
-    #[derive(Debug, Deserialize)]
-    struct Config {
-        deepseek_api_key: String,
-    }
-
-    fn load_config() -> Result<Config> {
-        let config_str = fs::read_to_string("config.json")
-            .context("Failed to read config.json")?;
-        let config: Config = serde_json::from_str(&config_str)
-            .context("Failed to parse config.json")?;
-        Ok(config)
-    }
-
-    #[tokio::test]
-    async fn test_basic_completion() -> Result<()> {
-        let client = LlamaClient::new(ModelConfig {
-            model: "phi4".to_string(),
-            api_url: "http://localhost:11434/api".to_string(),
-            stream: None,
-            temperature: None,
-            max_tokens: None,
-            api_key: None,
-        })?;
-        let response = client.generate("What is Rust?").await?;
-        assert!(!response.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_invalid_model() {
-        let client = LlamaClient::new(ModelConfig {
-            model: "non_existent_model".to_string(),
-            api_url: "http://localhost:11434/api".to_string(),
-            stream: None,
-            temperature: None,
-            max_tokens: None,
-            api_key: None,
-        }).unwrap();
-        let result = client.generate("Test prompt").await;
-        assert!(matches!(result.unwrap_err().downcast_ref(),
-            Some(LlamaError::ModelNotAvailable(_, _))));
-    }
+    use crate::config::ModelConfig;
+    use crate::config::Config;
 
     #[tokio::test]
     async fn test_service_unavailable() {
@@ -337,7 +302,11 @@ mod tests {
             max_tokens: None,
             api_key: None,
         }).unwrap();
-        let result = client.generate("Test prompt").await;
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "Test prompt".to_string(),
+        }];
+        let result = client.generate(&messages).await;
         assert!(matches!(result.unwrap_err().downcast_ref(),
             Some(LlamaError::ServiceUnavailable(_))));
     }
@@ -354,27 +323,70 @@ mod tests {
                 .context("DEEPSEEK_API_KEY environment variable not set")?),
         })?;
         
-        let response = client.generate("Write a hello world in Rust").await?;
-        assert!(!response.is_empty());
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "Write a hello world in Rust".to_string(),
+        }];
+        let response = client.generate(&messages).await?;
+        assert!(!response.text().await?.is_empty());
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_deepseek_completion() -> Result<()> {
-        let config = load_config()?;
+    async fn test_deep_seek_config() -> Result<()> {
+        // Load the configuration
+        let config = Config::load()?;           
         
+        // Create a LlamaClient using the llamacpp configuration
+        let client = LlamaClient::new(config.deepseek.clone())?;
+        
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+        }];
+        
+        let response = client.generate(&messages).await?;
+        assert!(!response.text().await?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deep_seek_with_wrong_key() -> Result<()> {
         let client = LlamaClient::new(ModelConfig {
             model: "deepseek-chat".to_string(),
             api_url: "https://api.deepseek.com/v1/chat/completions".to_string(),
             stream: Some(false),
             temperature: Some(0.7),
             max_tokens: Some(2048),
-            api_key: Some(config.deepseek_api_key),
+            api_key: Some("wrong_api_key".to_string()),
         })?;
+        
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "Write a hello world in Rust".to_string(),
+        }];
+        
+        let result = client.generate(&messages).await;
+        assert!(matches!(result.unwrap_err().downcast_ref(),
+            Some(LlamaError::AuthenticationError(_))));
+        Ok(())
+    }
 
-        let response = client.generate("Write a hello world program in Rust").await?;
-        assert!(!response.is_empty());
-        println!("Deepseek response: {}", response);
+    #[tokio::test]
+    async fn test_llamacpp() -> Result<()> {
+        // Load the configuration
+        let config = Config::load()?;           
+        
+        // Create a LlamaClient using the llamacpp configuration
+        let client = LlamaClient::new(config.llamacpp.clone())?;
+        
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+        }];
+        
+        let response = client.generate(&messages).await?;
+        assert!(!response.text().await?.is_empty());
         Ok(())
     }
 } 

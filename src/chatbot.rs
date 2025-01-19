@@ -117,7 +117,7 @@ pub struct ChatBot {
     pub current_provider: String,
     llama_client: llama::LlamaClient,
     web_search: WebSearch,
-    conversation_id: String,
+    pub conversation_id: String,
     search_results_rx: Option<tokio::sync::mpsc::Receiver<Result<Vec<SearchResult>>>>,
 }
 
@@ -343,7 +343,7 @@ impl ChatBot {
         );
 
         fs::write(&filename, content)?;
-        debug!("Saved conversation interaction to: {}", filename.display());
+        info!("Saved conversation interaction to: {}", filename.display());
         Ok(())
     }
 
@@ -371,7 +371,7 @@ impl ChatBot {
         }
 
         fs::write(&filename, content)?;
-        debug!("Saved full conversation history to: {}", filename.display());
+        info!("Saved full conversation history to: {}", filename.display());
 
         Ok(())
     }
@@ -383,4 +383,40 @@ impl ChatBot {
         }
         Ok(())
     }
+
+    pub fn set_topic(&mut self, topic: &str) -> Result<String> {
+        // Sanitize the topic to be used as a directory name
+        let sanitized_topic = topic.replace(" ", "_");
+        let old_conversation_id = self.conversation_id.clone();
+        self.conversation_id = sanitized_topic.clone();
+
+        // Get the old and new cache directory paths
+        let old_cache_dir = dirs::cache_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
+            .join("abot")
+            .join(&old_conversation_id);
+
+        let new_cache_dir = dirs::cache_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
+            .join("abot")
+            .join(&self.conversation_id);
+
+        // Rename the cache directory if it exists
+        if old_cache_dir.exists() {
+            debug!("Renaming cache directory from {} to {}", old_cache_dir.display(), new_cache_dir.display());
+            fs::rename(&old_cache_dir, &new_cache_dir)
+                .with_context(|| format!("Failed to rename cache directory from {} to {}", old_cache_dir.display(), new_cache_dir.display()))?;
+        } else {
+            debug!("Creating new cache directory for topic: {}", new_cache_dir.display());
+            fs::create_dir_all(&new_cache_dir)
+                .with_context(|| format!("Failed to create cache directory at {}", new_cache_dir.display()))?;
+        }
+
+        // Update the web search cache directory as well
+        self.web_search.cache_dir = new_cache_dir.clone();
+
+        info!("Conversation topic set to: {}, cache directory: {}", self.conversation_id, new_cache_dir.display());
+        Ok(self.conversation_id.clone())
+    }
+
 }

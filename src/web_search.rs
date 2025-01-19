@@ -8,7 +8,7 @@ use url::Url;
 use std::time::{SystemTime, UNIX_EPOCH};
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use crate::llama::{self, LlamaClient};
-use log::{debug, info, error};
+use log::{debug, info,error};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -64,8 +64,8 @@ impl WebSearch {
         }
 
         // Test LLama availability
-        let use_llama = false;
-        // let use_llama = match llama.test_availability().await {
+        let use_llama = true;
+        //  match llama.test_availability().await {
         //     Ok(true) => true,
         //     Ok(false) => {
         //         warn!("LLama service is not available, falling back to simple summaries");
@@ -89,12 +89,12 @@ impl WebSearch {
         })
     }
 
-    fn get_cache_path(&self, url: &str) -> PathBuf {
-        // Encode URL to be filesystem safe
-        let url_without_protocol = url.replace("https://", "").replace("http://", "");
-        let cache_path = self.cache_dir.join(percent_encode(url_without_protocol.as_bytes(), NON_ALPHANUMERIC).to_string());
-        cache_path
-    }
+    // fn get_cache_path(&self, url: &str) -> PathBuf {
+    //     // Encode URL to be filesystem safe
+    //     let url_without_protocol = url.replace("https://", "").replace("http://", "");
+    //     let cache_path = self.cache_dir.join(percent_encode(url_without_protocol.as_bytes(), NON_ALPHANUMERIC).to_string());
+    //     cache_path
+    // }
 
     pub async fn research(&mut self, query: &str) -> Result<Arc<RwLock<Vec<SearchResult>>>> {
         self.query = query.to_string();

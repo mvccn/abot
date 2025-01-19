@@ -199,11 +199,9 @@ async fn main() -> Result<()> {
                                                 error!("Error saving last interaction: {}", e);
                                             }
                                         }
-                                        //add /quit or /exit to quit the app
                                         "quit" | "exit" => {
                                             break;
                                         }
-                                        //add /log logging_level to set the logging level
                                         "log" => {
                                             if command.len() > 1 {
                                                 let logging_level = command[1];
@@ -252,6 +250,25 @@ async fn main() -> Result<()> {
                                                 "Raw mode {}",
                                                 if app.raw_mode { "enabled" } else { "disabled" }
                                             );
+                                        }
+                                        "reset" => {
+                                            app.chatbot.messages.clear();
+                                            info!("Chat history and context have been reset.");
+                                        }
+                                        "topic" => {
+                                            if command.len() > 1 {
+                                                let topic = command[1..].join(" ");
+                                                match app.chatbot.set_topic(&topic) {
+                                                    Ok(sanitized_topic) => {
+                                                        info!("Topic set to '{}'", sanitized_topic);
+                                                    }
+                                                    Err(e) => {
+                                                        error!("Failed to set topic '{}': {}", topic, e);
+                                                    }
+                                                }
+                                            } else {
+                                                error!("No topic specified");
+                                            }
                                         }
                                         _ => {
                                             error!("Unknown command: {}", input);
@@ -589,8 +606,8 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     // Status Bar with smaller text
     let status_text = format!(
-        "Provider: {} | {}",
-        app.chatbot.current_provider, app.info_message
+        "Provider: {} | Topic: {}",
+        app.chatbot.current_provider, app.chatbot.conversation_id
     );
     let status_bar = Paragraph::new(status_text)
         .block(Block::default().borders(Borders::NONE))
