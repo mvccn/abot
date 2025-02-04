@@ -2,3 +2,5 @@
 .env
 .lock
 .aider*
+*.log
+*.lock
