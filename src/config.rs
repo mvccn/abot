@@ -69,7 +69,7 @@ impl Default for Config {
                 max_tokens: None,
                 stream: None,
             },
-            web_search: WebSearchConfig { result_limit: 10 },
+            web_search: WebSearchConfig { result_limit: 5 },
         }
     }
 }

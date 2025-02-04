@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use log::{debug, error, info, LevelFilter, Log, Metadata, Record};
+use log::{debug, error, info, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use ratatui::{
     prelude::*,
     style::Style,
@@ -18,6 +18,9 @@ use ratatui::{
 use std::io::stdout;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, Once};
+use simplelog::{Config as SimpleLogConfig, WriteLogger};
+use std::fs::File;
+use tokio::time::{sleep, Duration};
 
 mod chatbot;
 mod config;
@@ -26,10 +29,9 @@ use config::Config;
 mod llama;
 mod markdown;
 mod web_search;
+mod llama_function;
 
-const APP_LOG_FILTER: &str = "abot=debug"; // Show debug logs for "abot" crate only
-                                           // Alternative if you want to include specific modules:
-                                           // const APP_LOG_FILTER: &str = "abot=debug,chatbot=debug,llama=debug";
+const APP_LOG_FILTER: &str = "abot=debug,chatbot=debug,llama=debug,html5ever=error, *=error";
 
 #[derive(Clone)]
 struct UiLogger {
@@ -141,6 +143,14 @@ async fn main() -> Result<()> {
                 )
             })
             .expect("Failed to set logger");
+
+        // // Set up file logger
+        // let file = File::create("abot.log").expect("Failed to create log file");
+        // WriteLogger::init(LevelFilter::Info, SimpleLogConfig::default(), file)
+        //     .expect("Failed to initialize file logger");
+
+        //composite logger
+        // init_loggers().expect("Failed to initialize loggers");
     });
 
     // Create app state locally
@@ -149,217 +159,211 @@ async fn main() -> Result<()> {
 
     // Main loop
     loop {
-        // Use app directly without unsafe
-        // let current_log_count = log_buffer.lock().unwrap().len();
-        // if current_log_count > app.last_log_count {
-        //     app.log_scroll = usize::MAX;
-        //     app.last_log_count = current_log_count;
-        // }
-
-        // // Check for new messages and auto-scroll if needed
-        // let current_message_count = app.chatbot.messages.len();
-        // if current_message_count > app.last_message_count {
-        //     app.scroll = usize::MAX; // Auto-scroll to bottom
-        //     app.last_message_count = current_message_count;
-        // }
-
+        // Draw UI first
         terminal.draw(|f| ui(f, &mut app))?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Esc => break,
-                        KeyCode::Enter => {
-                            if !app.input.is_empty() {
-                                let input = std::mem::take(&mut app.input);
+        tokio::select! {
+            _ = sleep(Duration::from_millis(16)) => {
+                // Timer tick for UI updates
+            }
+            result = tokio::task::spawn_blocking(|| event::poll(Duration::from_millis(1))) => {
+                if let Ok(Ok(true)) = result {
+                    if let Ok(Event::Key(key)) = event::read() {
+                        if key.kind == KeyEventKind::Press {
+                            match key.code {
+                                KeyCode::Esc => break,
+                                KeyCode::Enter => {
+                                    if !app.input.is_empty() {
+                                        let input = std::mem::take(&mut app.input);
 
-                                // Handle commands
-                                if input.starts_with("/") {
-                                    let command = input
-                                        .trim_start_matches("/")
-                                        .split_whitespace()
-                                        .collect::<Vec<_>>();
-                                    match command[0] {
-                                        "save" => {
-                                            if let Err(e) = app.chatbot.save_last_interaction() {
-                                                error!("Error saving last interaction: {}", e);
-                                            }
-                                        }
-                                        "quit" | "exit" => {
-                                            break;
-                                        }
-                                        "log" => {
-                                            if command.len() > 1 {
-                                                let logging_level = command[1];
-                                                if let Ok(level) =
-                                                    LevelFilter::from_str(logging_level)
-                                                {
-                                                    log::set_max_level(level);
-                                                    info!(
-                                                        "Logging level set to: {}",
-                                                        logging_level
-                                                    );
-                                                } else {
-                                                    error!(
-                                                        "Invalid logging level: {}",
-                                                        logging_level
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        "saveall" => {
-                                            if let Err(e) = app.chatbot.save_all_history() {
-                                                error!("Error saving all history: {}", e);
-                                            }
-                                        }
-                                        "model" => {
-                                            if command.len() > 1 {
-                                                let provider = command[1];
-                                                if let Err(e) = app.chatbot.set_provider(provider) {
-                                                    error!(
-                                                        "Failed to switch to provider '{}': {}",
-                                                        provider, e
-                                                    );
-                                                } else {
-                                                    info!(
-                                                        "Successfully switched to provider: {}",
-                                                        provider
-                                                    );
-                                                }
-                                            } else {
-                                                error!("Usage: /model <provider>");
-                                            }
-                                        }
-                                        "raw" => {
-                                            app.raw_mode = !app.raw_mode;
-                                            app.info_message = format!(
-                                                "Raw mode {}",
-                                                if app.raw_mode { "enabled" } else { "disabled" }
-                                            );
-                                        }
-                                        "reset" => {
-                                            app.chatbot.messages.clear();
-                                            info!("Chat history and context have been reset.");
-                                        }
-                                        "topic" => {
-                                            if command.len() > 1 {
-                                                let topic = command[1..].join(" ");
-                                                match app.chatbot.set_topic(&topic) {
-                                                    Ok(sanitized_topic) => {
-                                                        info!("Topic set to '{}'", sanitized_topic);
-                                                    }
-                                                    Err(e) => {
-                                                        error!("Failed to set topic '{}': {}", topic, e);
+                                        // Handle commands
+                                        if input.starts_with("/") {
+                                            let command = input
+                                                .trim_start_matches("/")
+                                                .split_whitespace()
+                                                .collect::<Vec<_>>();
+                                            match command[0] {
+                                                "save" => {
+                                                    if let Err(e) = app.chatbot.save_last_interaction() {
+                                                        error!("Error saving last interaction: {}", e);
                                                     }
                                                 }
-                                            } else {
-                                                error!("No topic specified");
-                                            }
-                                        }
-                                        _ => {
-                                            error!("Unknown command: {}", input);
-                                        }
-                                    }
-                                } else {
-                                    // Immediately display user message
-                                    // app.messages.push(format!("You: {}", input));
-                                    app.chatbot.add_message("user", &input);
-                                    // Force a redraw to show the user message
-                                    terminal.draw(|f| ui(f, &mut app))?;
-                                    match app.chatbot.query(&input).await {
-                                        Ok(mut stream) => {
-                                            app.chatbot.add_message("assistant", "");
-                                            app.current_response.clear();
-                                            app.is_streaming = true;
-                                            terminal.hide_cursor()?;
-
-                                            while let Some(chunk_result) = stream.next().await {
-                                                match chunk_result {
-                                                    Ok(content) => {
-                                                        if !content.is_empty() {
-                                                            app.current_response.push_str(&content);
-                                                            app.chatbot.update_last_message(
-                                                                &app.current_response,
+                                                "quit" | "exit" => {
+                                                    break;
+                                                }
+                                                "log" => {
+                                                    if command.len() > 1 {
+                                                        let logging_level = command[1];
+                                                        if let Ok(level) =
+                                                            LevelFilter::from_str(logging_level)
+                                                        {
+                                                            log::set_max_level(level);
+                                                            info!(
+                                                                "Logging level set to: {}",
+                                                                logging_level
                                                             );
-
-                                                            // Only auto-scroll if in follow mode
-                                                            if app.follow_mode {
-                                                                app.scroll = usize::MAX;
-                                                            }
-
-                                                            terminal.draw(|f| ui(f, &mut app))?;
+                                                        } else {
+                                                            error!(
+                                                                "Invalid logging level: {}",
+                                                                logging_level
+                                                            );
                                                         }
                                                     }
-                                                    Err(e) => {
-                                                        error!("Error receiving chunk: {}", e);
-                                                        break;
+                                                }
+                                                "saveall" => {
+                                                    if let Err(e) = app.chatbot.save_all_history() {
+                                                        error!("Error saving all history: {}", e);
                                                     }
                                                 }
+                                                "model" => {
+                                                    if command.len() > 1 {
+                                                        let provider = command[1];
+                                                        if let Err(e) = app.chatbot.set_provider(provider) {
+                                                            error!(
+                                                                "Failed to switch to provider '{}': {}",
+                                                                provider, e
+                                                            );
+                                                        } else {
+                                                            info!(
+                                                                "Successfully switched to provider: {}",
+                                                                provider
+                                                            );
+                                                        }
+                                                    } else {
+                                                        error!("Usage: /model <provider>");
+                                                    }
+                                                }
+                                                "raw" => {
+                                                    app.raw_mode = !app.raw_mode;
+                                                    app.info_message = format!(
+                                                        "Raw mode {}",
+                                                        if app.raw_mode { "enabled" } else { "disabled" }
+                                                    );
+                                                }
+                                                "reset" => {
+                                                    app.chatbot.messages.clear();
+                                                    info!("Chat history and context have been reset.");
+                                                }
+                                                "topic" => {
+                                                    if command.len() > 1 {
+                                                        let topic = command[1..].join(" ");
+                                                        match app.chatbot.set_topic(&topic) {
+                                                            Ok(sanitized_topic) => {
+                                                                info!("Topic set to '{}'", sanitized_topic);
+                                                            }
+                                                            Err(e) => {
+                                                                error!("Failed to set topic '{}': {}", topic, e);
+                                                            }
+                                                        }
+                                                    } else {
+                                                        error!("No topic specified");
+                                                    }
+                                                }
+                                                _ => {
+                                                    error!("Unknown command: {}", input);
+                                                }
                                             }
+                                        } else {
+                                            // Immediately display user message
+                                            // app.messages.push(format!("You: {}", input));
+                                            app.chatbot.add_message("user", &input);
+                                            // Force a redraw to show the user message
+                                            terminal.draw(|f| ui(f, &mut app))?;
+                                            match app.chatbot.query(&input).await {
+                                                Ok(mut stream) => {
+                                                    app.chatbot.add_message("assistant", "");
+                                                    app.current_response.clear();
+                                                    app.is_streaming = true;
+                                                    terminal.hide_cursor()?;
 
-                                            app.is_streaming = false;
-                                            terminal.show_cursor()?;
-                                            app.current_response.clear();
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to send message: {}", e);
+                                                    while let Some(chunk_result) = stream.next().await {
+                                                        match chunk_result {
+                                                            Ok(content) => {
+                                                                if !content.is_empty() {
+                                                                    app.current_response.push_str(&content);
+                                                                    app.chatbot.update_last_message(
+                                                                        &app.current_response,
+                                                                    );
+
+                                                                    // Only auto-scroll if in follow mode
+                                                                    if app.follow_mode {
+                                                                        app.scroll = usize::MAX;
+                                                                    }
+
+                                                                    terminal.draw(|f| ui(f, &mut app))?;
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error!("Error receiving chunk: {}", e);
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+
+                                                    app.is_streaming = false;
+                                                    terminal.show_cursor()?;
+                                                    app.current_response.clear();
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed to send message: {}", e);
+                                                }
+                                            }
                                         }
                                     }
                                 }
+                                KeyCode::Char(c) => {
+                                    app.input.push(c);
+                                }
+                                KeyCode::Backspace => {
+                                    app.input.pop();
+                                }
+                                KeyCode::Up => {
+                                    if app.is_log_focused {
+                                        app.log_scroll = app.log_scroll.saturating_sub(1);
+                                    } else {
+                                        app.scroll = app.scroll.saturating_sub(1);
+                                    }
+                                }
+                                KeyCode::Down => {
+                                    if app.is_log_focused {
+                                        app.log_scroll = app.log_scroll.saturating_add(1);
+                                    } else {
+                                        app.scroll = app.scroll.saturating_add(1);
+                                    }
+                                }
+                                KeyCode::PageUp => {
+                                    if !app.is_log_focused {
+                                        // Scroll up by the visible height of the chat area
+                                        // let scroll_amount = app.visible_height as usize;
+                                        debug!(
+                                            "Scroll up by 10, scroll: {}, visible_height: {}",
+                                            app.scroll, app.visible_height
+                                        );
+                                        app.scroll = app.scroll.saturating_sub(10);
+                                        // Disable follow mode when manually scrolling up
+                                        app.follow_mode = false;
+                                    }
+                                }
+                                KeyCode::PageDown => {
+                                    if !app.is_log_focused {
+                                        let scroll_amount = app.visible_height as usize;
+                                        app.scroll = app.scroll.saturating_add(scroll_amount);
+                                        debug!("Scroll down by 10, scroll:{}", app.scroll);
+                                        // if app.scroll >= max_scroll {
+                                        //     app.scroll = max_scroll;
+                                        //     app.follow_mode = true;
+                                        // }
+                                    }
+                                }
+                                KeyCode::Tab => {
+                                    app.is_log_focused = !app.is_log_focused;
+                                    if app.is_log_focused {
+                                        app.log_scroll = usize::MAX;
+                                    }
+                                }
+                                _ => {}
                             }
                         }
-                        KeyCode::Char(c) => {
-                            app.input.push(c);
-                        }
-                        KeyCode::Backspace => {
-                            app.input.pop();
-                        }
-                        KeyCode::Up => {
-                            if app.is_log_focused {
-                                app.log_scroll = app.log_scroll.saturating_sub(1);
-                            } else {
-                                app.scroll = app.scroll.saturating_sub(1);
-                            }
-                        }
-                        KeyCode::Down => {
-                            if app.is_log_focused {
-                                app.log_scroll = app.log_scroll.saturating_add(1);
-                            } else {
-                                app.scroll = app.scroll.saturating_add(1);
-                            }
-                        }
-                        KeyCode::PageUp => {
-                            if !app.is_log_focused {
-                                // Scroll up by the visible height of the chat area
-                                // let scroll_amount = app.visible_height as usize;
-                                debug!(
-                                    "Scroll up by 10, scroll: {}, visible_height: {}",
-                                    app.scroll, app.visible_height
-                                );
-                                app.scroll = app.scroll.saturating_sub(10);
-                                // Disable follow mode when manually scrolling up
-                                app.follow_mode = false;
-                            }
-                        }
-                        KeyCode::PageDown => {
-                            if !app.is_log_focused {
-                                let scroll_amount = app.visible_height as usize;
-                                app.scroll = app.scroll.saturating_add(scroll_amount);
-                                debug!("Scroll down by 10, scroll:{}", app.scroll);
-                                // if app.scroll >= max_scroll {
-                                //     app.scroll = max_scroll;
-                                //     app.follow_mode = true;
-                                // }
-                            }
-                        }
-                        KeyCode::Tab => {
-                            app.is_log_focused = !app.is_log_focused;
-                            if app.is_log_focused {
-                                app.log_scroll = usize::MAX;
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -609,4 +613,45 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     // Update app's visible height
     app.visible_height = chunks[0].height;
+}
+
+struct CompositeLogger {
+    ui_logger: UiLogger,
+    file_logger: WriteLogger<File>,
+}
+
+impl Log for CompositeLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        self.ui_logger.enabled(metadata) || self.file_logger.enabled(metadata)
+    }
+
+    fn log(&self, record: &Record) {
+        if self.ui_logger.enabled(record.metadata()) {
+            self.ui_logger.log(record);
+        }
+        if self.file_logger.enabled(record.metadata()) {
+            self.file_logger.log(record);
+        }
+    }
+
+    fn flush(&self) {
+        self.ui_logger.flush();
+        self.file_logger.flush();
+    }
+}
+
+fn init_loggers() -> Result<(), SetLoggerError> {
+    let ui_logger = UiLogger::new(1000);
+    let file = File::create("abot.log").expect("Failed to create log file");
+    let file_logger = WriteLogger::new(LevelFilter::Debug, SimpleLogConfig::default(), file);
+
+    let composite_logger = CompositeLogger {
+        ui_logger,
+        file_logger: *file_logger, // Dereference the Box to get the WriteLogger
+    };
+
+    log::set_boxed_logger(Box::new(composite_logger))?;
+    log::set_max_level(LevelFilter::from_str(APP_LOG_FILTER).unwrap_or(LevelFilter::Debug));
+
+    Ok(())
 }

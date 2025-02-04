@@ -12,6 +12,7 @@ use crate::web_search::WebSearch;
 use bytes::Bytes;
 use crate::config::Config;
 use ratatui::prelude::Line;
+use std::path::PathBuf;
 use crate::markdown;
 use crate::web_search::SearchResult;
 #[derive(Debug, Clone)]
@@ -31,85 +32,9 @@ impl ChatMessage {
             // cached_rendered_content: None,
         }
     }
-
-    // pub fn get_rendered_content(&mut self) -> Vec<Line<'static>> {
-    //     if let Some(cached) = &self.cached_rendered_content {
-    //         cached.clone()
-    //     } else {
-    //         let rendered = if self.role == "assistant" {
-    //             markdown::markdown_to_lines(&self.raw_content)
-    //         } else {
-    //             vec![Line::from(self.raw_content.to_string())]
-    //         };
-    //         self.cached_rendered_content = Some(rendered.clone());
-    //         rendered
-    //     }
-    // }
 }
 
-// #[derive(Debug)]
-// pub struct Conversation {
-//     messages: Vec<ChatMessage>,
-// }
-
-// impl Conversation {
-//     pub fn new() -> Self {
-//         Self {
-//             messages: Vec::new(),
-//         }
-//     }
-
-//     pub fn add_message(&mut self, role: &str, content: &str) {
-//         let message = ChatMessage::new(role, content);
-//         self.messages.push(message);
-//     }
-
-//     pub fn finalize_streamed_response(&mut self, final_content: String) {
-//         let mut message = ChatMessage::new("assistant", &final_content);
-//         let rendered = markdown::markdown_to_lines(&final_content);
-//         message.cached_rendered_content = Some(rendered);
-//         self.messages.push(message);
-//     }
-
-//     pub fn get_rendered_messages(&self) -> Vec<Line<'static>> {
-//         let mut rendered_messages = Vec::new();
-        
-//         for message in &self.messages {
-//             let prefix = match message.role.as_str() {
-//                 "assistant" => Span::styled("Assistant: ", Style::default().fg(Color::Green)),
-//                 "user" => Span::styled("User: ", Style::default().fg(Color::Blue)),
-//                 _ => Span::raw("System: "),
-//             };
-//             rendered_messages.push(Line::from(vec![prefix]));
-            
-//             if let Some(cached) = &message.cached_rendered_content {
-//                 rendered_messages.extend(cached.clone());
-//             } else {
-//                 rendered_messages.extend(if message.role == "assistant" {
-//                     markdown::markdown_to_lines(&message.raw_content)
-//                 } else {
-//                     vec![Line::from(message.raw_content.to_string())]
-//                 });
-//             }
-//         }
-        
-//         rendered_messages
-//     }
-
-//     pub fn get_raw_messages(&self) -> Vec<llama::Message> {
-//         self.messages.iter()
-//             .map(|msg| llama::Message {
-//                 role: msg.role.clone(),
-//                 content: msg.raw_content.clone(),
-//             })
-//             .collect()
-//     }
-
-//     pub fn last_message_mut(&mut self) -> Option<&mut ChatMessage> {
-//         self.messages.last_mut()
-//     }
-// }
-
+  
 #[derive(Debug)]
 pub struct ChatBot {
     pub messages: Vec<ChatMessage>,
@@ -138,13 +63,12 @@ impl ChatBot {
                 .with_context(|| format!("Failed to create cache directory at {}", cache_dir.display()))?;
         }
 
-        let llama_config = config.llamacpp.clone();
-        let llama_client_for_search = llama::LlamaClient::new(llama_config)?;
+        // let llama_config = config.llamacpp.clone();
+        // let llama_client_for_search = llama::LlamaClient::new(llama_config)?;
 
         let web_search = WebSearch::new(
             &conversation_id,
             config.web_search.result_limit,
-            llama_client_for_search,
         ).await?;
 
         let llama_client = llama::LlamaClient::new(config.deepseek.clone())?;
@@ -163,6 +87,13 @@ impl ChatBot {
         bot.add_message("system", &initial_prompt);
 
         Ok(bot)
+    }
+
+    pub fn cache_dir(&self) -> PathBuf {
+        dirs::home_dir().unwrap()
+            .join(".cache")
+            .join("abot")
+            .join(&self.conversation_id)
     }
 
     pub fn add_message(&mut self, role: &str, content: &str) {
@@ -196,78 +127,50 @@ impl ChatBot {
 
         if is_web_search {
             info!("🔍 Web search initiated for: '{}'", query_text);
-            
-            // Clear existing results
+
+            // Clear existing results.
             {
                 let mut results = self.web_search.results.write().await;
                 results.clear();
             }
-            
-            // Create channel for receiving search results
-            let (tx, rx) = tokio::sync::mpsc::channel(1);
-            self.search_results_rx = Some(rx);
-            
-            // Spawn background search task
-            let mut web_search = self.web_search.clone();
-            let query = query_text.clone();
-            
-            tokio::spawn(async move {
-                debug!("Background search task started for query: '{}'", query);
-                match web_search.research(&query).await {
-                    Ok(results) => {
-                        if let Err(e) = tx.send(Ok(results.read().await.clone())).await {
-                            error!("Failed to send search results: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        if let Err(send_err) = tx.send(Err(e)).await {
-                            error!("Failed to send error: {}", send_err);
-                        }
-                    }
-                }
-            });
 
-            // Wait for search results with timeout
-            match tokio::time::timeout(std::time::Duration::from_secs(10), self.search_results_rx.as_mut().unwrap().recv()).await {
-                Ok(Some(Ok(results))) => {
-                    info!("📚 Retrieved {} search results", results.len());
-                    let context = results.iter()
-                        .enumerate()
-                        .map(|(i, result)| {
-                            format!(
-                                "Source {}: {}\nSummary: {}", 
-                                i + 1, 
-                                result.url,
-                                result.summary
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n\n");
-                    
-                    self.add_message("system", &format!(
-                        "Here are relevant search results for your query:\n\n{}", 
-                        context
-                    ));
-                }
-                Ok(Some(Err(e))) => {
+            // Await complete research with a timeout.
+            let results = match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                self.web_search.research(&query_text, true)
+            )
+            .await {
+                Ok(Ok(results)) => results,
+                Ok(Err(e)) => {
                     error!("❌ Web search failed: {}", e);
-                    self.add_message("system", "Sorry, the web search failed. I'll try to help with my existing knowledge.");
-                }
-                Ok(None) => {
-                    error!("Search results channel closed unexpectedly");
-                    self.add_message("system", "The web search was interrupted. I'll try to help with my existing knowledge.");
+                    vec![]
                 }
                 Err(_) => {
                     error!("Web search timed out");
-                    self.add_message("system", "The web search took too long. I'll try to help with my existing knowledge.");
+                    vec![]
                 }
+            };
+
+            if !results.is_empty() {
+                info!("📚 Retrieved {} search results", results.len());
+                let context = results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, result)| format!("Source {}: {}\nSummary: {}", i + 1, result.url, result.summary))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                info!("Context: {}", context);
+                self.add_message("system", &format!(
+                    "Here are relevant search results for your query:\n\n{}",
+                    context
+                ));
+            } else {
+                self.add_message("system", "No search results were found.");
             }
-            
-            self.search_results_rx = None;
         }
 
-        // Generate response using LLama
-        info!("Generating response using context from {} messages", self.messages.len());
+        // Generate response using LLama    
+        info!("Generating response using context from {:?} messages", self.messages); //display full message
         let response = self.llama_client.generate(&self.get_raw_messages()).await?;
 
         if self.config.default.stream {
@@ -310,10 +213,7 @@ impl ChatBot {
             return Ok(());
         }
 
-        let cache_dir = dirs::cache_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
-            .join("abot")
-            .join(&self.conversation_id);
+        let cache_dir = self.cache_dir();
 
         let save_dir = cache_dir.join("save");
         if !save_dir.exists() {
@@ -352,12 +252,7 @@ impl ChatBot {
             debug!("No conversation history to save - conversation is empty");
             return Ok(());
         }
-
-        let cache_dir = dirs::cache_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
-            .join("abot")
-            .join(&self.conversation_id);
-
+        let cache_dir = self.cache_dir();
         let save_dir = cache_dir.join("save");
         if !save_dir.exists() {
             fs::create_dir_all(&save_dir)?;
@@ -387,19 +282,12 @@ impl ChatBot {
     pub fn set_topic(&mut self, topic: &str) -> Result<String> {
         // Sanitize the topic to be used as a directory name
         let sanitized_topic = topic.replace(" ", "_");
-        let old_conversation_id = self.conversation_id.clone();
-        self.conversation_id = sanitized_topic.clone();
-
+        // let old_conversation_id = self.conversation_id.clone();
+        
         // Get the old and new cache directory paths
-        let old_cache_dir = dirs::cache_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
-            .join("abot")
-            .join(&old_conversation_id);
-
-        let new_cache_dir = dirs::cache_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find cache directory"))?
-            .join("abot")
-            .join(&self.conversation_id);
+        let old_cache_dir = self.cache_dir();
+        self.conversation_id = sanitized_topic.clone();
+        let new_cache_dir = self.cache_dir();
 
         // Rename the cache directory if it exists
         if old_cache_dir.exists() {
@@ -407,7 +295,7 @@ impl ChatBot {
             fs::rename(&old_cache_dir, &new_cache_dir)
                 .with_context(|| format!("Failed to rename cache directory from {} to {}", old_cache_dir.display(), new_cache_dir.display()))?;
         } else {
-            debug!("Creating new cache directory for topic: {}", new_cache_dir.display());
+            info!("Creating new cache directory for topic: {}", new_cache_dir.display());
             fs::create_dir_all(&new_cache_dir)
                 .with_context(|| format!("Failed to create cache directory at {}", new_cache_dir.display()))?;
         }
