@@ -160,14 +160,17 @@ pub fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                         lines.push(Line::from(current_spans.drain(..).collect::<Vec<_>>()));
                     }
                     list_level += 1;
-                    list_start_numbers.push(start.unwrap_or(1).try_into().unwrap()); // Convert u64 to usize
+                    // Only track numbering for ordered lists
+                    if let Some(start_num) = start {
+                        list_start_numbers.push(start_num.try_into().unwrap());
+                    }
                 }
                 Tag::Item => {
                     if list_level > 0 {
                         let indent = "  ".repeat(list_level - 1);
                         current_spans.push(Span::raw(indent));
                         
-                        // Add bullet or number for ordered list
+                        // Use number only if list is ordered, otherwise use bullet
                         if let Some(start_num) = list_start_numbers.last_mut() {
                             current_spans.push(Span::styled(format!("{}. ", *start_num), current_style));
                             *start_num += 1; // Increment for the next item

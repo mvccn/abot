@@ -4,7 +4,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures::StreamExt;
+use futures::{StreamExt, FutureExt};
 use log::{debug, error, info, LevelFilter};
 use ratatui::{
     prelude::*,
@@ -30,7 +30,8 @@ mod llama_function;
 
 const APP_LOG_FILTER: &str = "abot=debug,chatbot=debug,llama=debug,html5ever=error, *=error";
 
-#[derive(Debug)]
+// Define MessageStream only once and make it public.
+
 struct App {
     chatbot: ChatBot,
     input: String,
@@ -43,6 +44,27 @@ struct App {
     raw_mode: bool,      // show raw (unformatted) content
     follow_mode: bool,   // auto scroll when new content is added
     is_streaming: bool,  // whether streaming is in progress
+    // holds the pending streaming response from a query
+    pending_stream: Option<chatbot::MessageStream>,
+}
+
+// Manual Debug implementation for App (skipping pending_stream)
+impl std::fmt::Debug for App {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+       f.debug_struct("App")
+         .field("chatbot", &self.chatbot)
+         .field("input", &self.input)
+         .field("scroll", &self.scroll)
+         .field("log_scroll", &self.log_scroll)
+         .field("current_response", &self.current_response)
+         .field("info_message", &self.info_message)
+         .field("visible_height", &self.visible_height)
+         .field("is_log_focused", &self.is_log_focused)
+         .field("raw_mode", &self.raw_mode)
+         .field("follow_mode", &self.follow_mode)
+         .field("is_streaming", &self.is_streaming)
+         .finish()
+    }
 }
 
 impl App {
@@ -60,6 +82,7 @@ impl App {
             raw_mode: false,
             follow_mode: true,
             is_streaming: false,
+            pending_stream: None,
         })
     }
 }
@@ -92,25 +115,28 @@ async fn main() -> Result<()> {
     let config = Config::load()?;
     let mut app = App::new(config).await?;
 
-    // Main loop
+    // Main loop: we now check both for new key events and for any pending query stream data
     loop {
-        // Draw UI first
+        // Draw UI every tick.
         terminal.draw(|f| ui(f, &mut app))?;
 
-        tokio::select! {
-            _ = sleep(Duration::from_millis(16)) => {
-                // Timer tick for UI updates
-            }
-            result = tokio::task::spawn_blocking(|| event::poll(Duration::from_millis(1))) => {
-                if let Ok(Ok(true)) = result {
-                    if let Ok(Event::Key(key)) = event::read() {
-                        if key.kind == KeyEventKind::Press {
-                            match key.code {
-                                KeyCode::Esc => break,
-                                KeyCode::Enter => {
-                                    if !app.input.is_empty() {
+        // Allow the user to type even while a query is streaming.
+        // Process key events with a short timeout.
+        if let Ok(Ok(true)) = tokio::task::spawn_blocking(|| event::poll(Duration::from_millis(1))).await {
+            if let Ok(evt) = event::read() {
+                if let Event::Key(key) = evt {
+                    if key.kind == KeyEventKind::Press {
+                        match key.code {
+                            KeyCode::Esc => break,
+                            KeyCode::Enter => {
+                                if !app.input.is_empty() {
+                                    // Do not allow a new submit if a query is already in progress.
+                                    if app.is_streaming {
+                                        // Optionally set an info message showing that the query is in progress.
+                                        app.info_message = "Query already in progress; please wait until it is complete.".to_string();
+                                    } else {
                                         let input = std::mem::take(&mut app.input);
-                                        
+
                                         // Handle commands starting with /
                                         if input.starts_with("/") {
                                             let command = input.trim_start_matches("/").split_whitespace().collect::<Vec<_>>();
@@ -177,94 +203,103 @@ async fn main() -> Result<()> {
                                                 }
                                             }
                                         } else {
-                                            // Append user message and query the chatbot
+                                            // Regular query:
                                             app.chatbot.add_message("user", &input);
                                             terminal.draw(|f| ui(f, &mut app))?;
                                             match app.chatbot.query(&input).await {
-                                                Ok(mut stream) => {
+                                                Ok(stream) => {
+                                                    // Add an empty assistant message that will be updated with the response.
                                                     app.chatbot.add_message("assistant", "");
                                                     app.current_response.clear();
                                                     app.is_streaming = true;
+                                                    // Store the stream so that it can be polled in the main loop.
+                                                    app.pending_stream = Some(stream);
                                                     terminal.hide_cursor()?;
-                                                    loop {
-                                                        tokio::select! {
-                                                            maybe_chunk = stream.next() => {
-                                                                if let Some(chunk_result) = maybe_chunk {
-                                                                    match chunk_result {
-                                                                        Ok(content) => {
-                                                                            if !content.is_empty() {
-                                                                                app.current_response.push_str(&content);
-                                                                                app.chatbot.update_last_message(&app.current_response);
-                                                                                if app.follow_mode {
-                                                                                    app.scroll = usize::MAX;
-                                                                                }
-                                                                            }
-                                                                        },
-                                                                        Err(e) => {
-                                                                            error!("Error receiving chunk: {}", e);
-                                                                            break;
-                                                                        },
-                                                                    }
-                                                                } else {
-                                                                    break;
-                                                                }
-                                                            },
-                                                            _ = sleep(Duration::from_millis(16)) => {}
-                                                        }
-                                                        terminal.draw(|f| ui(f, &mut app))?;
-                                                    }
-                                                    app.is_streaming = false;
-                                                    terminal.show_cursor()?;
-                                                    app.current_response.clear();
                                                 }
                                                 Err(e) => error!("Failed to send message: {}", e),
                                             }
                                         }
                                     }
                                 }
-                                KeyCode::Char(c) => app.input.push(c),
-                                KeyCode::Backspace => { app.input.pop(); },
-                                KeyCode::Up => {
-                                    if app.is_log_focused {
-                                        app.log_scroll = app.log_scroll.saturating_sub(1);
-                                    } else {
-                                        app.scroll = app.scroll.saturating_sub(1);
-                                    }
-                                }
-                                KeyCode::Down => {
-                                    if app.is_log_focused {
-                                        app.log_scroll = app.log_scroll.saturating_add(1);
-                                    } else {
-                                        app.scroll = app.scroll.saturating_add(1);
-                                    }
-                                }
-                                KeyCode::PageUp => {
-                                    if !app.is_log_focused {
-                                        debug!("Scroll up by 10, scroll: {}, visible_height: {}", app.scroll, app.visible_height);
-                                        app.scroll = app.scroll.saturating_sub(10);
-                                        app.follow_mode = false;
-                                    }
-                                }
-                                KeyCode::PageDown => {
-                                    if !app.is_log_focused {
-                                        let scroll_amount = app.visible_height as usize;
-                                        app.scroll = app.scroll.saturating_add(scroll_amount);
-                                        debug!("Scroll down by 10, scroll:{}", app.scroll);
-                                    }
-                                }
-                                KeyCode::Tab => {
-                                    app.is_log_focused = !app.is_log_focused;
-                                    if app.is_log_focused {
-                                        app.log_scroll = usize::MAX;
-                                    }
-                                }
-                                _ => {}
                             }
+                            KeyCode::Char(c) => app.input.push(c),
+                            KeyCode::Backspace => { app.input.pop(); },
+                            KeyCode::Up => {
+                                if app.is_log_focused {
+                                    app.log_scroll = app.log_scroll.saturating_sub(1);
+                                } else {
+                                    app.scroll = app.scroll.saturating_sub(1);
+                                }
+                            }
+                            KeyCode::Down => {
+                                if app.is_log_focused {
+                                    app.log_scroll = app.log_scroll.saturating_add(1);
+                                } else {
+                                    app.scroll = app.scroll.saturating_add(1);
+                                }
+                            }
+                            KeyCode::PageUp => {
+                                if !app.is_log_focused {
+                                    debug!("Scroll up by 10, scroll: {}, visible_height: {}", app.scroll, app.visible_height);
+                                    app.scroll = app.scroll.saturating_sub(10);
+                                    app.follow_mode = false;
+                                }
+                            }
+                            KeyCode::PageDown => {
+                                if !app.is_log_focused {
+                                    let scroll_amount = app.visible_height as usize;
+                                    app.scroll = app.scroll.saturating_add(scroll_amount);
+                                    debug!("Scroll down by 10, scroll:{}", app.scroll);
+                                }
+                            }
+                            KeyCode::Tab => {
+                                app.is_log_focused = !app.is_log_focused;
+                                if app.is_log_focused {
+                                    app.log_scroll = usize::MAX;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
             }
         }
+
+        // NON-BLOCKING: check for any new streamed response data from the bot.
+        if app.pending_stream.is_some() {
+            // Try to poll the stream without waiting.
+            if let Some(chunk_option) = app.pending_stream.as_mut().unwrap().next().now_or_never() {
+                match chunk_option {
+                    Some(Ok(content)) => {
+                        if !content.is_empty() {
+                            app.current_response.push_str(&content);
+                            app.chatbot.update_last_message(&app.current_response);
+                            if app.follow_mode {
+                                app.scroll = usize::MAX;
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        error!("Error receiving chunk: {}", e);
+                        app.is_streaming = false;
+                        app.pending_stream = None;
+                        terminal.show_cursor()?;
+                        app.current_response.clear();
+                    }
+                    None => {
+                        // The stream ended normally.
+                        app.is_streaming = false;
+                        app.pending_stream = None;
+                        terminal.show_cursor()?;
+                        // Clear the temporary current_response if desired.
+                        app.current_response.clear();
+                    }
+                }
+            }
+        }
+
+        // Small delay so the UI updates roughly at ~60 FPS.
+        sleep(Duration::from_millis(16)).await;
     }
 
     // Restore terminal
@@ -338,11 +373,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     };
 
     // Auto-scroll to bottom if follow_mode is enabled or scroll is set to ULONG_MAX.
-    if app.follow_mode || app.scroll == usize::MAX {
-        app.scroll = max_scroll;
-    } else {
-        app.scroll = app.scroll.min(max_scroll);
-    }
+    app.scroll = app.scroll.min(max_scroll);
 
     // --- Messages Widget ---
     let message_area = chunks[0];

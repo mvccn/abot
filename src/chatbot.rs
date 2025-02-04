@@ -15,6 +15,10 @@ use ratatui::prelude::Line;
 use std::path::PathBuf;
 use crate::markdown;
 use crate::web_search::SearchResult;
+
+// Make the type alias public so that it can be referenced in main.rs:
+pub type MessageStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
+
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub role: String,
@@ -45,8 +49,6 @@ pub struct ChatBot {
     pub conversation_id: String,
     search_results_rx: Option<tokio::sync::mpsc::Receiver<Result<Vec<SearchResult>>>>,
 }
-
-type MessageStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
 
 impl ChatBot {
     pub async fn new(config: Config) -> Result<Self> {
